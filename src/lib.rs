@@ -21,6 +21,7 @@
 #![forbid(unsafe_code)]
 
 mod blend;
+pub mod mask;
 mod simd;
 
 /// Porter-Duff and artistic blend modes.
@@ -130,6 +131,40 @@ pub fn blend_row_solid(fg: &mut [f32], pixel: &[f32; 4], mode: BlendMode) {
 pub fn blend_row_solid_opaque(fg: &mut [f32], pixel: &[f32; 4], mode: BlendMode) {
     assert_eq!(fg.len() % 4, 0, "length must be divisible by 4");
     blend::dispatch_blend_row_solid_opaque(fg, pixel, mode);
+}
+
+/// Multiply premultiplied RGBA row by a per-pixel mask.
+///
+/// `mask` has one `f32` per pixel (`mask.len() == fg.len() / 4`).
+/// Each mask value is broadcast to all 4 channels of the corresponding pixel.
+/// In premultiplied space, this correctly modulates both color and alpha.
+///
+/// Use [`mask::MaskFill`] hints from [`mask::MaskSource::fill_mask_row`] to skip
+/// no-op rows (all-opaque) or zero entire rows (all-transparent).
+///
+/// # Panics
+///
+/// Panics if `fg.len() != mask.len() * 4` or `fg.len()` is not divisible by 4.
+#[inline]
+pub fn mask_row(fg: &mut [f32], mask: &[f32]) {
+    assert_eq!(fg.len(), mask.len() * 4, "fg must have 4× as many elements as mask");
+    assert_eq!(fg.len() % 4, 0, "fg length must be divisible by 4");
+    simd::mask_row_apply(fg, mask);
+}
+
+/// Multiply premultiplied RGBA row by a constant mask value.
+///
+/// Equivalent to `mask_row` with a uniform mask, but avoids the mask buffer.
+///
+/// # Panics
+///
+/// Panics if `fg.len()` is not divisible by 4.
+#[inline]
+pub fn mask_row_constant(fg: &mut [f32], alpha: f32) {
+    assert_eq!(fg.len() % 4, 0, "fg length must be divisible by 4");
+    for v in fg.iter_mut() {
+        *v *= alpha;
+    }
 }
 
 #[cfg(test)]

@@ -45,3 +45,8 @@ pub(crate) fn blend_src_over_solid(fg: &mut [f32], pixel: &[f32; 4]) {
 pub(crate) fn blend_src_over_solid_opaque(fg: &mut [f32], pixel: &[f32; 4]) {
     archmage::incant!(blend_src_over_solid_opaque(fg, pixel))
 }
+
+/// Multiply premultiplied RGBA row by per-pixel mask (one f32 per pixel).
+pub(crate) fn mask_row_apply(fg: &mut [f32], mask: &[f32]) {
+    archmage::incant!(mask_row_apply(fg, mask))
+}

@@ -25,3 +25,11 @@ pub(crate) fn blend_src_over_solid_opaque_wasm128(
 ) {
     super::wide_kernels::blend_src_over_solid_opaque_wide(fg, pixel);
 }
+
+pub(crate) fn mask_row_apply_wasm128(
+    _token: Wasm128Token,
+    fg: &mut [f32],
+    mask: &[f32],
+) {
+    super::wide_kernels::mask_row_apply_wide(fg, mask);
+}

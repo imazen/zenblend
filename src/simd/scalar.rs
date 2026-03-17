@@ -47,3 +47,18 @@ pub(crate) fn blend_src_over_solid_opaque_scalar(
         s[3] = 1.0;
     }
 }
+
+/// Multiply premultiplied RGBA by per-pixel mask, scalar fallback.
+/// mask has one f32 per pixel, fg has 4 f32 per pixel.
+pub(crate) fn mask_row_apply_scalar(
+    _token: ScalarToken,
+    fg: &mut [f32],
+    mask: &[f32],
+) {
+    for (pixel, &m) in fg.chunks_exact_mut(4).zip(mask.iter()) {
+        pixel[0] *= m;
+        pixel[1] *= m;
+        pixel[2] *= m;
+        pixel[3] *= m;
+    }
+}

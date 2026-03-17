@@ -45,3 +45,15 @@ pub(super) fn blend_src_over_solid_opaque_wide(fg: &mut [f32], pixel: &[f32; 4])
         s.copy_from_slice(&arr);
     }
 }
+
+/// Per-pixel mask multiply using wide f32x4.
+#[inline]
+pub(super) fn mask_row_apply_wide(fg: &mut [f32], mask: &[f32]) {
+    for (pixel, &m) in fg.chunks_exact_mut(4).zip(mask.iter()) {
+        let fg_pixel = wide::f32x4::from([pixel[0], pixel[1], pixel[2], pixel[3]]);
+        let mask_vec = wide::f32x4::splat(m);
+        let result = fg_pixel * mask_vec;
+        let arr: [f32; 4] = result.into();
+        pixel.copy_from_slice(&arr);
+    }
+}

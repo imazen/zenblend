@@ -25,3 +25,11 @@ pub(crate) fn blend_src_over_solid_opaque_neon(
 ) {
     super::wide_kernels::blend_src_over_solid_opaque_wide(fg, pixel);
 }
+
+pub(crate) fn mask_row_apply_neon(
+    _token: NeonToken,
+    fg: &mut [f32],
+    mask: &[f32],
+) {
+    super::wide_kernels::mask_row_apply_wide(fg, mask);
+}

@@ -134,3 +134,39 @@ pub(crate) fn blend_src_over_solid_opaque_v3(
         s[3] = 1.0;
     }
 }
+
+/// Per-pixel mask multiply, AVX2.
+///
+/// Each mask value is broadcast to 4 RGBA channels: `fg[px*4+c] *= mask[px]`.
+/// Processes 2 pixels per 256-bit iteration.
+#[archmage::arcane]
+pub(crate) fn mask_row_apply_v3(
+    _token: X64V3Token,
+    fg: &mut [f32],
+    mask: &[f32],
+) {
+    let (fg_chunks, _) = fg.as_chunks_mut::<8>();
+    let (mask_chunks, _) = mask.as_chunks::<2>();
+
+    for (fg_chunk, mask_pair) in fg_chunks.iter_mut().zip(mask_chunks.iter()) {
+        let fg_vec = _mm256_loadu_ps(fg_chunk);
+        // Broadcast mask[0] to lanes 0-3, mask[1] to lanes 4-7
+        let mask_vec = _mm256_set_ps(
+            mask_pair[1], mask_pair[1], mask_pair[1], mask_pair[1],
+            mask_pair[0], mask_pair[0], mask_pair[0], mask_pair[0],
+        );
+        let result = _mm256_mul_ps(fg_vec, mask_vec);
+        _mm256_storeu_ps(fg_chunk, result);
+    }
+
+    // Scalar tail
+    let done = fg_chunks.len() * 2;
+    let remaining_fg = &mut fg[done * 4..];
+    let remaining_mask = &mask[done..];
+    for (pixel, &m) in remaining_fg.chunks_exact_mut(4).zip(remaining_mask.iter()) {
+        pixel[0] *= m;
+        pixel[1] *= m;
+        pixel[2] *= m;
+        pixel[3] *= m;
+    }
+}
