@@ -79,13 +79,19 @@ impl RoundedRectMask {
         let w = width as f32;
         let h = height as f32;
         let centers = [
-            (radii[0], radii[0]),                 // top-left
-            (w - radii[1], radii[1]),              // top-right
-            (w - radii[2], h - radii[2]),          // bottom-right
-            (radii[3], h - radii[3]),              // bottom-left
+            (radii[0], radii[0]),         // top-left
+            (w - radii[1], radii[1]),     // top-right
+            (w - radii[2], h - radii[2]), // bottom-right
+            (radii[3], h - radii[3]),     // bottom-left
         ];
         let max_radius = radii.iter().copied().fold(0.0f32, f32::max);
-        Self { width, height, radii, centers, max_radius }
+        Self {
+            width,
+            height,
+            radii,
+            centers,
+            max_radius,
+        }
     }
 
     /// Create a uniform rounded rectangle (same radius on all corners).
@@ -128,10 +134,10 @@ impl MaskSource for RoundedRectMask {
 
             // Does this row fall within this corner's y-range?
             let in_corner_y = match i {
-                0 => yf < r,           // top-left: y < radius
-                1 => yf < r,           // top-right: y < radius
-                2 => yf > h - r,       // bottom-right: y > height - radius
-                3 => yf > h - r,       // bottom-left: y > height - radius
+                0 => yf < r,     // top-left: y < radius
+                1 => yf < r,     // top-right: y < radius
+                2 => yf > h - r, // bottom-right: y > height - radius
+                3 => yf > h - r, // bottom-left: y > height - radius
                 _ => false,
             };
             if !in_corner_y {
@@ -179,10 +185,10 @@ impl MaskSource for RoundedRectMask {
 
                 // Is this pixel inside the corner's bounding box?
                 let in_corner_x = match i {
-                    0 => xf < cx,       // top-left: x < center_x
-                    1 => xf > cx,       // top-right: x > center_x
-                    2 => xf > cx,       // bottom-right: x > center_x
-                    3 => xf < cx,       // bottom-left: x < center_x
+                    0 => xf < cx, // top-left: x < center_x
+                    1 => xf > cx, // top-right: x > center_x
+                    2 => xf > cx, // bottom-right: x > center_x
+                    3 => xf < cx, // bottom-left: x < center_x
                     _ => false,
                 };
                 if !in_corner_x {
@@ -211,6 +217,229 @@ impl MaskSource for RoundedRectMask {
         } else {
             // Row was entirely opaque (corners didn't clip anything)
             MaskFill::AllOpaque
+        }
+    }
+}
+
+/// Linear gradient mask.
+///
+/// Produces a gradient from 0.0 to 1.0 along the vector from `start` to `end`
+/// (in pixel coordinates). Pixels before `start` are 0.0, after `end` are 1.0.
+///
+/// # Example
+///
+/// ```rust
+/// use zenblend::mask::{LinearGradientMask, MaskSource};
+///
+/// // Top-to-bottom gradient on a 100×200 image
+/// let mask = LinearGradientMask::new(100, 200, (50.0, 0.0), (50.0, 200.0));
+/// let mut row = vec![0.0f32; 100];
+/// mask.fill_mask_row(&mut row, 0);   // near 0.0
+/// mask.fill_mask_row(&mut row, 199); // near 1.0
+/// ```
+pub struct LinearGradientMask {
+    width: u32,
+    // Direction vector (normalized)
+    dx: f32,
+    dy: f32,
+    // 1.0 / gradient_length
+    inv_len: f32,
+    // Start point for origin reference
+    sx: f32,
+    sy: f32,
+}
+
+impl LinearGradientMask {
+    /// Create a linear gradient mask.
+    ///
+    /// `start` and `end` are in pixel coordinates. The gradient ramps from 0.0
+    /// at `start` to 1.0 at `end` along the vector between them.
+    pub fn new(width: u32, _height: u32, start: (f32, f32), end: (f32, f32)) -> Self {
+        let dx = end.0 - start.0;
+        let dy = end.1 - start.1;
+        let len = libm::sqrtf(dx * dx + dy * dy);
+        let (dx, dy, inv_len) = if len > 0.0 {
+            (dx / len, dy / len, 1.0 / len)
+        } else {
+            (0.0, 0.0, 0.0)
+        };
+        Self {
+            width,
+            dx,
+            dy,
+            inv_len,
+            sx: start.0,
+            sy: start.1,
+        }
+    }
+}
+
+impl MaskSource for LinearGradientMask {
+    fn fill_mask_row(&self, dst: &mut [f32], y: u32) -> MaskFill {
+        debug_assert_eq!(dst.len(), self.width as usize);
+        let yf = y as f32 + 0.5;
+
+        // If gradient has zero length, everything is opaque
+        if self.inv_len <= 0.0 {
+            dst.fill(1.0);
+            return MaskFill::AllOpaque;
+        }
+
+        // Project first and last pixel centers onto the gradient vector
+        let first_proj = ((0.5 - self.sx) * self.dx + (yf - self.sy) * self.dy) * self.inv_len;
+        let last_proj = ((self.width as f32 - 0.5 - self.sx) * self.dx + (yf - self.sy) * self.dy)
+            * self.inv_len;
+
+        let (min_t, max_t) = if first_proj < last_proj {
+            (first_proj, last_proj)
+        } else {
+            (last_proj, first_proj)
+        };
+
+        if min_t >= 1.0 {
+            dst.fill(1.0);
+            return MaskFill::AllOpaque;
+        }
+        if max_t <= 0.0 {
+            dst.fill(0.0);
+            return MaskFill::AllTransparent;
+        }
+
+        for x in 0..self.width as usize {
+            let xf = x as f32 + 0.5;
+            let proj = ((xf - self.sx) * self.dx + (yf - self.sy) * self.dy) * self.inv_len;
+            dst[x] = proj.clamp(0.0, 1.0);
+        }
+
+        if min_t >= 1.0 - f32::EPSILON && max_t <= 1.0 + f32::EPSILON {
+            MaskFill::AllOpaque
+        } else if max_t <= f32::EPSILON {
+            MaskFill::AllTransparent
+        } else {
+            MaskFill::Partial
+        }
+    }
+}
+
+/// Radial gradient mask.
+///
+/// 1.0 inside `inner_radius`, 0.0 outside `outer_radius`,
+/// linear ramp between. The gradient is centered at `center`.
+///
+/// # Example
+///
+/// ```rust
+/// use zenblend::mask::{RadialGradientMask, MaskSource};
+///
+/// // Spotlight centered at (50, 50)
+/// let mask = RadialGradientMask::new(100, 100, (50.0, 50.0), 10.0, 40.0);
+/// let mut row = vec![0.0f32; 100];
+/// mask.fill_mask_row(&mut row, 50); // center row: inner=1.0, ramp, outer=0.0
+/// ```
+pub struct RadialGradientMask {
+    width: u32,
+    cx: f32,
+    cy: f32,
+    inner_r: f32,
+    outer_r: f32,
+    inv_ramp: f32, // 1.0 / (outer_r - inner_r)
+}
+
+impl RadialGradientMask {
+    /// Create a radial gradient mask.
+    ///
+    /// - `center`: center point in pixel coordinates
+    /// - `inner_radius`: fully opaque (1.0) inside this radius
+    /// - `outer_radius`: fully transparent (0.0) outside this radius
+    pub fn new(
+        width: u32,
+        _height: u32,
+        center: (f32, f32),
+        inner_radius: f32,
+        outer_radius: f32,
+    ) -> Self {
+        let inner_r = inner_radius.max(0.0);
+        let outer_r = outer_radius.max(inner_r);
+        let ramp = outer_r - inner_r;
+        let inv_ramp = if ramp > 0.0 { 1.0 / ramp } else { 0.0 };
+        Self {
+            width,
+            cx: center.0,
+            cy: center.1,
+            inner_r,
+            outer_r,
+            inv_ramp,
+        }
+    }
+}
+
+impl MaskSource for RadialGradientMask {
+    fn fill_mask_row(&self, dst: &mut [f32], y: u32) -> MaskFill {
+        debug_assert_eq!(dst.len(), self.width as usize);
+        let yf = y as f32 + 0.5;
+        let dy = yf - self.cy;
+        let dy2 = dy * dy;
+
+        // Fast path: if the closest possible pixel is beyond outer_r, all transparent
+        // The closest x to center is cx (clamped to row).
+        let min_dx = if self.cx < 0.5 {
+            0.5 - self.cx
+        } else if self.cx > self.width as f32 - 0.5 {
+            self.cx - (self.width as f32 - 0.5)
+        } else {
+            0.0
+        };
+        let min_dist2 = min_dx * min_dx + dy2;
+        if min_dist2 >= self.outer_r * self.outer_r {
+            dst.fill(0.0);
+            return MaskFill::AllTransparent;
+        }
+
+        // Fast path: if the farthest possible pixel is within inner_r, all opaque
+        let far_x = if self.cx < self.width as f32 * 0.5 {
+            self.width as f32 - 0.5
+        } else {
+            0.5
+        };
+        let max_dx = (far_x - self.cx).abs();
+        let max_dist2 = max_dx * max_dx + dy2;
+        if max_dist2 <= self.inner_r * self.inner_r {
+            dst.fill(1.0);
+            return MaskFill::AllOpaque;
+        }
+
+        let mut all_opaque = true;
+        let mut all_transparent = true;
+
+        for x in 0..self.width as usize {
+            let xf = x as f32 + 0.5;
+            let dx = xf - self.cx;
+            let dist = libm::sqrtf(dx * dx + dy2);
+
+            let v = if dist <= self.inner_r {
+                1.0
+            } else if dist >= self.outer_r {
+                0.0
+            } else {
+                // Linear ramp: 1.0 at inner_r, 0.0 at outer_r
+                1.0 - (dist - self.inner_r) * self.inv_ramp
+            };
+            dst[x] = v;
+
+            if v < 1.0 {
+                all_opaque = false;
+            }
+            if v > 0.0 {
+                all_transparent = false;
+            }
+        }
+
+        if all_opaque {
+            MaskFill::AllOpaque
+        } else if all_transparent {
+            MaskFill::AllTransparent
+        } else {
+            MaskFill::Partial
         }
     }
 }
@@ -280,7 +509,10 @@ mod tests {
         // but the very edge pixels may be in the AA zone (> 0.99).
         mask.fill_mask_row(&mut row, 50);
         let near_opaque = row.iter().filter(|&&v| v > 0.99).count();
-        assert!(near_opaque >= 98, "center row should be nearly all opaque, got {near_opaque}/100");
+        assert!(
+            near_opaque >= 98,
+            "center row should be nearly all opaque, got {near_opaque}/100"
+        );
     }
 
     #[test]
@@ -292,7 +524,10 @@ mod tests {
         assert_eq!(fill, MaskFill::Partial);
         let transparent: usize = row.iter().filter(|&&v| v == 0.0).count();
         // Most pixels should be fully transparent at the top edge
-        assert!(transparent >= 80, "expected mostly transparent at top edge, got {transparent}/100 transparent");
+        assert!(
+            transparent >= 80,
+            "expected mostly transparent at top edge, got {transparent}/100 transparent"
+        );
     }
 
     #[test]
@@ -315,10 +550,7 @@ mod tests {
         for y in 0..200 {
             mask.fill_mask_row(&mut row, y);
             for (x, &v) in row.iter().enumerate() {
-                assert!(
-                    (0.0..=1.0).contains(&v),
-                    "out of range at ({x},{y}): {v}"
-                );
+                assert!((0.0..=1.0).contains(&v), "out of range at ({x},{y}): {v}");
             }
         }
     }
@@ -340,6 +572,132 @@ mod tests {
                 break;
             }
         }
-        assert!(found_fractional, "expected fractional AA values in corner arcs");
+        assert!(
+            found_fractional,
+            "expected fractional AA values in corner arcs"
+        );
+    }
+
+    // === LinearGradientMask tests ===
+
+    #[test]
+    fn linear_gradient_top_to_bottom() {
+        let mask = LinearGradientMask::new(10, 100, (5.0, 0.0), (5.0, 100.0));
+        let mut row = vec![0.0f32; 10];
+
+        // Row 0: near start → near 0
+        let fill = mask.fill_mask_row(&mut row, 0);
+        assert_eq!(fill, MaskFill::Partial);
+        assert!(row[5] < 0.02, "top should be near 0, got {}", row[5]);
+
+        // Row 99: near end → near 1
+        mask.fill_mask_row(&mut row, 99);
+        assert!(row[5] > 0.98, "bottom should be near 1, got {}", row[5]);
+    }
+
+    #[test]
+    fn linear_gradient_monotonic() {
+        let mask = LinearGradientMask::new(1, 200, (0.5, 0.0), (0.5, 200.0));
+        let mut row = vec![0.0f32; 1];
+        let mut prev = -1.0f32;
+        for y in 0..200 {
+            mask.fill_mask_row(&mut row, y);
+            assert!(
+                row[0] >= prev - 1e-6,
+                "not monotonic at y={y}: prev={prev}, cur={}",
+                row[0]
+            );
+            prev = row[0];
+        }
+    }
+
+    #[test]
+    fn linear_gradient_endpoints() {
+        let mask = LinearGradientMask::new(100, 1, (0.0, 0.5), (100.0, 0.5));
+        let mut row = vec![0.0f32; 100];
+        mask.fill_mask_row(&mut row, 0);
+        // First pixel center (0.5) → 0.5/100 ≈ 0.005
+        assert!(row[0] < 0.02);
+        // Last pixel center (99.5) → 99.5/100 ≈ 0.995
+        assert!(row[99] > 0.98);
+    }
+
+    #[test]
+    fn linear_gradient_all_opaque() {
+        // Gradient ends before the image starts (in y)
+        let mask = LinearGradientMask::new(10, 100, (5.0, -200.0), (5.0, -100.0));
+        let mut row = vec![0.0f32; 10];
+        let fill = mask.fill_mask_row(&mut row, 0);
+        assert_eq!(fill, MaskFill::AllOpaque);
+    }
+
+    #[test]
+    fn linear_gradient_all_transparent() {
+        // Gradient starts after the image ends
+        let mask = LinearGradientMask::new(10, 100, (5.0, 200.0), (5.0, 300.0));
+        let mut row = vec![0.0f32; 10];
+        let fill = mask.fill_mask_row(&mut row, 0);
+        assert_eq!(fill, MaskFill::AllTransparent);
+    }
+
+    // === RadialGradientMask tests ===
+
+    #[test]
+    fn radial_gradient_center_opaque() {
+        let mask = RadialGradientMask::new(100, 100, (50.0, 50.0), 10.0, 40.0);
+        let mut row = vec![0.0f32; 100];
+        mask.fill_mask_row(&mut row, 50);
+        // Center pixel (50.5, 50.5): distance ≈ 0.7 < inner_r=10 → 1.0
+        assert_eq!(row[50], 1.0);
+    }
+
+    #[test]
+    fn radial_gradient_outside_zero() {
+        let mask = RadialGradientMask::new(100, 100, (50.0, 50.0), 10.0, 40.0);
+        let mut row = vec![0.0f32; 100];
+        mask.fill_mask_row(&mut row, 50);
+        // Pixel at x=0 (0.5, 50.5): distance ≈ 49.5 > outer_r=40 → 0.0
+        assert_eq!(row[0], 0.0);
+    }
+
+    #[test]
+    fn radial_gradient_symmetry() {
+        let mask = RadialGradientMask::new(100, 100, (50.0, 50.0), 10.0, 40.0);
+        let mut row = vec![0.0f32; 100];
+        mask.fill_mask_row(&mut row, 50);
+        // Symmetric around center
+        for x in 0..50 {
+            assert!(
+                (row[x] - row[99 - x]).abs() < 1e-5,
+                "asymmetry at x={x}: left={}, right={}",
+                row[x],
+                row[99 - x]
+            );
+        }
+    }
+
+    #[test]
+    fn radial_gradient_ramp() {
+        let mask = RadialGradientMask::new(200, 200, (100.0, 100.0), 20.0, 80.0);
+        let mut row = vec![0.0f32; 200];
+        mask.fill_mask_row(&mut row, 100);
+        // Check that values between inner and outer are fractional
+        let mut found_fractional = false;
+        for &v in &row {
+            if v > 0.0 && v < 1.0 {
+                found_fractional = true;
+                break;
+            }
+        }
+        assert!(found_fractional, "expected fractional values in ramp zone");
+    }
+
+    #[test]
+    fn radial_gradient_far_row_transparent() {
+        let mask = RadialGradientMask::new(100, 100, (50.0, 50.0), 5.0, 10.0);
+        let mut row = vec![0.0f32; 100];
+        // Row 0: dy=49.5, far beyond outer_r=10
+        let fill = mask.fill_mask_row(&mut row, 0);
+        assert_eq!(fill, MaskFill::AllTransparent);
     }
 }
