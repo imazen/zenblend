@@ -305,10 +305,10 @@ impl MaskSource for LinearGradientMask {
             return MaskFill::AllTransparent;
         }
 
-        for x in 0..self.width as usize {
+        for (x, d) in dst.iter_mut().enumerate() {
             let xf = x as f32 + 0.5;
             let proj = ((xf - self.sx) * self.dx + (yf - self.sy) * self.dy) * self.inv_len;
-            dst[x] = proj.clamp(0.0, 1.0);
+            *d = proj.clamp(0.0, 1.0);
         }
 
         if min_t >= 1.0 - f32::EPSILON && max_t <= 1.0 + f32::EPSILON {
@@ -411,7 +411,7 @@ impl MaskSource for RadialGradientMask {
         let mut all_opaque = true;
         let mut all_transparent = true;
 
-        for x in 0..self.width as usize {
+        for (x, d) in dst.iter_mut().enumerate() {
             let xf = x as f32 + 0.5;
             let dx = xf - self.cx;
             let dist = libm::sqrtf(dx * dx + dy2);
@@ -424,7 +424,7 @@ impl MaskSource for RadialGradientMask {
                 // Linear ramp: 1.0 at inner_r, 0.0 at outer_r
                 1.0 - (dist - self.inner_r) * self.inv_ramp
             };
-            dst[x] = v;
+            *d = v;
 
             if v < 1.0 {
                 all_opaque = false;
