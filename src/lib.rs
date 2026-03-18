@@ -192,6 +192,56 @@ pub fn mask_row_constant(fg: &mut [f32], alpha: f32) {
     }
 }
 
+/// Apply a mask to a premultiplied RGBA row using span hints.
+///
+/// Uses [`MaskSource::mask_spans`] to identify opaque, transparent, and partial
+/// regions. Opaque spans are skipped entirely. Transparent spans are zeroed.
+/// Only partial spans invoke per-pixel mask multiplication — typically a small
+/// fraction of the row (e.g., corner arcs for rounded rectangles).
+///
+/// `mask_buf` is a scratch buffer with one `f32` per pixel (`fg.len() / 4`).
+/// Only the partial-span portions are filled by the mask source.
+///
+/// # Panics
+///
+/// Panics if `fg.len() != mask_buf.len() * 4` or `fg.len()` is not divisible by 4.
+#[inline]
+pub fn apply_mask_spans(
+    fg: &mut [f32],
+    mask_buf: &mut [f32],
+    mask: &dyn mask::MaskSource,
+    y: u32,
+) {
+    assert_eq!(
+        fg.len(),
+        mask_buf.len() * 4,
+        "fg must have 4× as many elements as mask_buf"
+    );
+    assert_eq!(fg.len() % 4, 0, "fg length must be divisible by 4");
+
+    let spans = mask.mask_spans(mask_buf, y);
+
+    for span in spans.iter() {
+        let px_start = span.start as usize;
+        let px_end = span.end as usize;
+        let ch_start = px_start * 4;
+        let ch_end = px_end * 4;
+
+        match span.kind {
+            mask::SpanKind::Opaque => {} // skip
+            mask::SpanKind::Transparent => {
+                fg[ch_start..ch_end].fill(0.0);
+            }
+            mask::SpanKind::Partial => {
+                simd::mask_row_apply(
+                    &mut fg[ch_start..ch_end],
+                    &mask_buf[px_start..px_end],
+                );
+            }
+        }
+    }
+}
+
 /// Multiply R, G, B by per-pixel mask; leave alpha untouched.
 ///
 /// `mask` has one `f32` per pixel (`mask.len() == fg.len() / 4`).

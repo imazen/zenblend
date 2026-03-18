@@ -17,6 +17,97 @@ pub enum MaskFill {
     Partial,
 }
 
+/// What kind of pixels a span contains.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SpanKind {
+    /// All pixels are 1.0 — skip entirely.
+    Opaque,
+    /// All pixels are 0.0 — zero the pixel data.
+    Transparent,
+    /// Mixed values — fill mask buffer and multiply this range only.
+    Partial,
+}
+
+/// A contiguous horizontal span with uniform mask behavior.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MaskSpan {
+    /// First pixel (inclusive).
+    pub start: u32,
+    /// One past last pixel (exclusive).
+    pub end: u32,
+    /// What to do with this span.
+    pub kind: SpanKind,
+}
+
+/// Inline collection of mask spans for one row.
+///
+/// Most mask shapes produce ≤ 5 spans per row (e.g., rounded rect:
+/// transparent, partial, opaque, partial, transparent). The inline
+/// capacity of 8 covers all practical cases without allocation.
+#[derive(Clone, Debug)]
+pub struct MaskSpans {
+    spans: [MaskSpan; 8],
+    len: u8,
+}
+
+impl MaskSpans {
+    /// Create an empty span list.
+    pub fn new() -> Self {
+        Self {
+            spans: [MaskSpan { start: 0, end: 0, kind: SpanKind::Opaque }; 8],
+            len: 0,
+        }
+    }
+
+    /// Create a span list with a single span covering the full width.
+    pub fn uniform(width: u32, kind: SpanKind) -> Self {
+        let mut s = Self::new();
+        s.push(MaskSpan { start: 0, end: width, kind });
+        s
+    }
+
+    /// Add a span. Panics if capacity (8) is exceeded.
+    pub fn push(&mut self, span: MaskSpan) {
+        assert!((self.len as usize) < self.spans.len(), "MaskSpans overflow (max 8)");
+        self.spans[self.len as usize] = span;
+        self.len += 1;
+    }
+
+    /// Number of spans.
+    pub fn len(&self) -> usize {
+        self.len as usize
+    }
+
+    /// Whether there are no spans.
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// Iterate over spans.
+    pub fn iter(&self) -> impl Iterator<Item = &MaskSpan> {
+        self.spans[..self.len as usize].iter()
+    }
+
+    /// Convert to the legacy `MaskFill` hint (for callers that don't use spans).
+    pub fn to_mask_fill(&self) -> MaskFill {
+        if self.len == 1 {
+            match self.spans[0].kind {
+                SpanKind::Opaque => return MaskFill::AllOpaque,
+                SpanKind::Transparent => return MaskFill::AllTransparent,
+                SpanKind::Partial => return MaskFill::Partial,
+            }
+        }
+        // Multiple spans → at least one non-uniform region
+        MaskFill::Partial
+    }
+}
+
+impl Default for MaskSpans {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Row-level mask generator.
 ///
 /// Implementations produce one `f32` per pixel (not per channel) for a given
@@ -30,6 +121,81 @@ pub trait MaskSource {
     /// `dst.len()` equals the image width in pixels.
     /// Returns a [`MaskFill`] hint so callers can skip no-op rows.
     fn fill_mask_row(&self, dst: &mut [f32], y: u32) -> MaskFill;
+
+    /// Return spans describing which pixel ranges are opaque, transparent, or partial.
+    ///
+    /// This enables callers to skip or zero entire SIMD-aligned blocks without
+    /// per-pixel mask multiplication. For rounded corners, the vast majority of
+    /// pixels are in the opaque span — only the corner edges need actual multiply.
+    ///
+    /// The default implementation calls [`fill_mask_row`](Self::fill_mask_row) and
+    /// scans the result. Override for masks that can compute spans analytically
+    /// (e.g., rounded rectangles know their corner extents from geometry).
+    ///
+    /// Spans must be non-overlapping, ordered by `start`, and cover `[0, width)`.
+    fn mask_spans(&self, dst: &mut [f32], y: u32) -> MaskSpans {
+        let width = dst.len() as u32;
+        let fill = self.fill_mask_row(dst, y);
+        match fill {
+            MaskFill::AllOpaque => MaskSpans::uniform(width, SpanKind::Opaque),
+            MaskFill::AllTransparent => MaskSpans::uniform(width, SpanKind::Transparent),
+            MaskFill::Partial => scan_spans(dst),
+        }
+    }
+}
+
+/// Scan a filled mask buffer and extract contiguous spans.
+fn scan_spans(mask: &[f32]) -> MaskSpans {
+    let width = mask.len() as u32;
+    let mut spans = MaskSpans::new();
+    if width == 0 {
+        return spans;
+    }
+
+    let classify = |v: f32| -> SpanKind {
+        if v >= 1.0 {
+            SpanKind::Opaque
+        } else if v <= 0.0 {
+            SpanKind::Transparent
+        } else {
+            SpanKind::Partial
+        }
+    };
+
+    let mut current_kind = classify(mask[0]);
+    let mut span_start = 0u32;
+
+    for (i, &v) in mask.iter().enumerate().skip(1) {
+        let kind = classify(v);
+        if kind != current_kind {
+            // Merge adjacent partial spans with different kinds would be wrong;
+            // but we can stop early if we'd exceed capacity by merging remaining into Partial
+            if spans.len() >= 7 {
+                // Reserve last slot for the rest as Partial
+                spans.push(MaskSpan {
+                    start: span_start,
+                    end: width,
+                    kind: SpanKind::Partial,
+                });
+                return spans;
+            }
+            spans.push(MaskSpan {
+                start: span_start,
+                end: i as u32,
+                kind: current_kind,
+            });
+            current_kind = kind;
+            span_start = i as u32;
+        }
+    }
+
+    // Final span
+    spans.push(MaskSpan {
+        start: span_start,
+        end: width,
+        kind: current_kind,
+    });
+    spans
 }
 
 /// Antialiased rounded rectangle mask.
@@ -218,6 +384,110 @@ impl MaskSource for RoundedRectMask {
             // Row was entirely opaque (corners didn't clip anything)
             MaskFill::AllOpaque
         }
+    }
+
+    fn mask_spans(&self, dst: &mut [f32], y: u32) -> MaskSpans {
+        let h = self.height as f32;
+        let w = self.width;
+        let yf = y as f32 + 0.5;
+
+        // Fast path: row entirely inside all corner arcs
+        let in_top = yf >= self.max_radius;
+        let in_bottom = yf <= h - self.max_radius;
+        if in_top && in_bottom {
+            return MaskSpans::uniform(w, SpanKind::Opaque);
+        }
+
+        // Compute the x-extents affected by each active corner.
+        // Left side: affected by top-left (i=0) or bottom-left (i=3)
+        // Right side: affected by top-right (i=1) or bottom-right (i=2)
+        let mut left_end = 0u32; // rightmost pixel affected by left corners
+        let mut right_start = w; // leftmost pixel affected by right corners
+
+        for (i, &(cx, _cy)) in self.centers.iter().enumerate() {
+            let r = self.radii[i];
+            if r <= 0.0 {
+                continue;
+            }
+
+            let in_corner_y = match i {
+                0 => yf < r,
+                1 => yf < r,
+                2 => yf > h - r,
+                3 => yf > h - r,
+                _ => false,
+            };
+            if !in_corner_y {
+                continue;
+            }
+
+            let dy = yf - self.centers[i].1;
+            let r_outer = r + 0.5;
+            let r_outer2 = r_outer * r_outer;
+            let dy2 = dy * dy;
+            let x_extent = if r_outer2 > dy2 {
+                libm::sqrtf(r_outer2 - dy2)
+            } else {
+                0.0
+            };
+
+            match i {
+                0 | 3 => {
+                    // Left corner: affects 0..ceil(cx + x_extent)
+                    let end = ((cx + x_extent).ceil() as u32).min(w);
+                    left_end = left_end.max(end);
+                }
+                1 | 2 => {
+                    // Right corner: affects floor(cx - x_extent)..width
+                    let start = ((cx - x_extent).floor().max(0.0)) as u32;
+                    right_start = right_start.min(start);
+                }
+                _ => {}
+            }
+        }
+
+        // Fill the mask buffer (needed for partial spans)
+        let fill = self.fill_mask_row(dst, y);
+        if fill == MaskFill::AllOpaque {
+            return MaskSpans::uniform(w, SpanKind::Opaque);
+        }
+
+        // Build spans: [left partial] [opaque center] [right partial]
+        // Clamp so left_end <= right_start
+        if left_end > right_start {
+            // Corners overlap — entire row is partial
+            let mut spans = MaskSpans::new();
+            spans.push(MaskSpan { start: 0, end: w, kind: SpanKind::Partial });
+            return spans;
+        }
+
+        let mut spans = MaskSpans::new();
+
+        if left_end > 0 {
+            spans.push(MaskSpan {
+                start: 0,
+                end: left_end,
+                kind: SpanKind::Partial,
+            });
+        }
+
+        if left_end < right_start {
+            spans.push(MaskSpan {
+                start: left_end,
+                end: right_start,
+                kind: SpanKind::Opaque,
+            });
+        }
+
+        if right_start < w {
+            spans.push(MaskSpan {
+                start: right_start,
+                end: w,
+                kind: SpanKind::Partial,
+            });
+        }
+
+        spans
     }
 }
 
@@ -699,5 +969,113 @@ mod tests {
         // Row 0: dy=49.5, far beyond outer_r=10
         let fill = mask.fill_mask_row(&mut row, 0);
         assert_eq!(fill, MaskFill::AllTransparent);
+    }
+
+    // === MaskSpans tests ===
+
+    #[test]
+    fn spans_all_opaque_center_row() {
+        let mask = RoundedRectMask::uniform(100, 100, 20.0);
+        let mut row = vec![0.0f32; 100];
+        let spans = mask.mask_spans(&mut row, 50);
+        assert_eq!(spans.len(), 1);
+        let s = spans.iter().next().unwrap();
+        assert_eq!(s.kind, SpanKind::Opaque);
+        assert_eq!(s.start, 0);
+        assert_eq!(s.end, 100);
+    }
+
+    #[test]
+    fn spans_corner_row_has_partial_and_opaque() {
+        let mask = RoundedRectMask::uniform(200, 200, 40.0);
+        let mut row = vec![0.0f32; 200];
+        // Row 5: intersects top-left and top-right corners
+        let spans = mask.mask_spans(&mut row, 5);
+        // Should have: [partial left corner] [opaque center] [partial right corner]
+        assert!(spans.len() >= 2, "expected at least 2 spans, got {}", spans.len());
+
+        let kinds: Vec<SpanKind> = spans.iter().map(|s| s.kind).collect();
+        assert!(
+            kinds.contains(&SpanKind::Opaque),
+            "expected an opaque span in {:?}",
+            kinds
+        );
+        assert!(
+            kinds.contains(&SpanKind::Partial),
+            "expected a partial span in {:?}",
+            kinds
+        );
+
+        // Spans should cover entire width
+        let total: u32 = spans.iter().map(|s| s.end - s.start).sum();
+        assert_eq!(total, 200);
+
+        // Spans should be ordered and non-overlapping
+        let mut prev_end = 0u32;
+        for s in spans.iter() {
+            assert_eq!(s.start, prev_end, "gap or overlap in spans");
+            prev_end = s.end;
+        }
+    }
+
+    #[test]
+    fn spans_opaque_center_is_large() {
+        // For a 1000px wide image with 20px corners, the opaque center should
+        // be at least 900px — only ~20px on each side affected by corners.
+        let mask = RoundedRectMask::uniform(1000, 1000, 20.0);
+        let mut row = vec![0.0f32; 1000];
+        let spans = mask.mask_spans(&mut row, 5);
+        let opaque_pixels: u32 = spans
+            .iter()
+            .filter(|s| s.kind == SpanKind::Opaque)
+            .map(|s| s.end - s.start)
+            .sum();
+        assert!(
+            opaque_pixels >= 900,
+            "expected ≥900 opaque pixels, got {opaque_pixels}"
+        );
+    }
+
+    #[test]
+    fn spans_default_impl_scans_gradient() {
+        // LinearGradientMask uses the default scan_spans implementation
+        let mask = LinearGradientMask::new(100, 1, (0.0, 0.5), (100.0, 0.5));
+        let mut row = vec![0.0f32; 100];
+        let spans = mask.mask_spans(&mut row, 0);
+        // Gradient: left is transparent, right is opaque, middle is partial
+        // With scan_spans, we get many tiny transitions. Just verify coverage.
+        let total: u32 = spans.iter().map(|s| s.end - s.start).sum();
+        assert_eq!(total, 100);
+    }
+
+    #[test]
+    fn spans_apply_matches_fill() {
+        // Verify that apply_mask_spans produces the same result as fill_mask_row + mask_row
+        let mask = RoundedRectMask::uniform(100, 100, 20.0);
+
+        for y in [0, 5, 10, 50, 90, 95, 99] {
+            // Method 1: fill + mask_row
+            let mut pixels1 = vec![0.5f32; 400]; // 100 pixels × 4ch
+            let mut mask_buf1 = vec![0.0f32; 100];
+            let fill = mask.fill_mask_row(&mut mask_buf1, y);
+            match fill {
+                MaskFill::AllOpaque => {}
+                MaskFill::AllTransparent => pixels1.fill(0.0),
+                MaskFill::Partial => crate::mask_row(&mut pixels1, &mask_buf1),
+            }
+
+            // Method 2: apply_mask_spans
+            let mut pixels2 = vec![0.5f32; 400];
+            let mut mask_buf2 = vec![0.0f32; 100];
+            crate::apply_mask_spans(&mut pixels2, &mut mask_buf2, &mask, y);
+
+            // Results must match
+            for (i, (a, b)) in pixels1.iter().zip(pixels2.iter()).enumerate() {
+                assert!(
+                    (a - b).abs() < 1e-6,
+                    "mismatch at y={y} index={i}: fill+mask={a}, spans={b}"
+                );
+            }
+        }
     }
 }
