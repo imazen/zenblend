@@ -100,12 +100,107 @@ impl MaskSpans {
         // Multiple spans → at least one non-uniform region
         MaskFill::Partial
     }
+
+    /// Snap span boundaries to pixel multiples of `align`, expanding Partial
+    /// spans and shrinking Opaque/Transparent neighbors.
+    ///
+    /// `align` is in **pixels** (e.g., 2 for AVX2 4ch RGBA, 4 for AVX-512 4ch).
+    /// After alignment, every Partial span's `start` and `end` are multiples of
+    /// `align` (clamped to `[0, width]`), so the SIMD kernel processes clean
+    /// blocks with no scalar tail.
+    ///
+    /// This is always safe because:
+    /// - Expanding Partial into Opaque territory: mask=1.0, multiply is identity.
+    /// - Expanding Partial into Transparent territory: mask=0.0, multiply zeros.
+    ///
+    /// Spans that shrink to zero width are removed. Adjacent spans with the same
+    /// kind after adjustment are merged.
+    pub fn align_to(&mut self, align: u32) {
+        if align <= 1 || self.len <= 1 {
+            return;
+        }
+
+        let n = self.len as usize;
+        let width = if n > 0 { self.spans[n - 1].end } else { return };
+
+        // Pass 1: expand each Partial span's start down and end up to align boundary.
+        for i in 0..n {
+            if self.spans[i].kind == SpanKind::Partial {
+                self.spans[i].start = round_down(self.spans[i].start, align);
+                self.spans[i].end = round_up(self.spans[i].end, align).min(width);
+            }
+        }
+
+        // Pass 2: resolve overlaps — Partial always wins over neighbors.
+        // Walk left to right, clamping each span's start to the previous span's end.
+        for i in 1..n {
+            if self.spans[i].start < self.spans[i - 1].end {
+                // Overlap: the earlier span was shrunk by the later's expansion,
+                // or the later span was expanded into the earlier.
+                // Whichever is Partial wins.
+                if self.spans[i].kind == SpanKind::Partial {
+                    // Partial expanded left — shrink the predecessor
+                    self.spans[i - 1].end = self.spans[i].start;
+                } else if self.spans[i - 1].kind == SpanKind::Partial {
+                    // Predecessor expanded right — shrink this span
+                    self.spans[i].start = self.spans[i - 1].end;
+                } else {
+                    // Neither is Partial (shouldn't happen in practice)
+                    self.spans[i].start = self.spans[i - 1].end;
+                }
+            }
+        }
+
+        // Pass 3: remove zero-width spans and merge adjacent same-kind spans.
+        let mut write = 0usize;
+        for read in 0..n {
+            if self.spans[read].start >= self.spans[read].end {
+                continue; // zero-width, skip
+            }
+            if write > 0 && self.spans[write - 1].kind == self.spans[read].kind {
+                // Merge with previous
+                self.spans[write - 1].end = self.spans[read].end;
+            } else {
+                self.spans[write] = self.spans[read];
+                write += 1;
+            }
+        }
+        self.len = write as u8;
+    }
+}
+
+/// Round down to nearest multiple of `align`.
+#[inline]
+fn round_down(val: u32, align: u32) -> u32 {
+    val / align * align
+}
+
+/// Round up to nearest multiple of `align`.
+#[inline]
+fn round_up(val: u32, align: u32) -> u32 {
+    val.div_ceil(align) * align
 }
 
 impl Default for MaskSpans {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Preferred pixel alignment for mask span boundaries on the current platform.
+///
+/// This is the number of RGBA pixels processed per SIMD iteration in `mask_row`:
+/// - x86_64 (AVX2): 2 pixels (8 floats per 256-bit register)
+/// - AArch64 (NEON) / WASM32 (SIMD128): 1 pixel (4 floats per 128-bit register)
+/// - Scalar fallback: 1 pixel
+///
+/// Pass this to [`MaskSpans::align_to`] to ensure Partial spans start and end
+/// on SIMD block boundaries, eliminating scalar tails in the mask multiply kernel.
+pub const fn mask_pixel_align() -> u32 {
+    #[cfg(target_arch = "x86_64")]
+    { 2 }
+    #[cfg(not(target_arch = "x86_64"))]
+    { 1 }
 }
 
 /// Row-level mask generator.
@@ -1074,6 +1169,101 @@ mod tests {
                 assert!(
                     (a - b).abs() < 1e-6,
                     "mismatch at y={y} index={i}: fill+mask={a}, spans={b}"
+                );
+            }
+        }
+    }
+
+    // === align_to tests ===
+
+    #[test]
+    fn align_noop_for_single_span() {
+        let mut spans = MaskSpans::uniform(100, SpanKind::Opaque);
+        spans.align_to(4);
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans.iter().next().unwrap().kind, SpanKind::Opaque);
+    }
+
+    #[test]
+    fn align_expands_partial_shrinks_neighbors() {
+        // [Transparent 0..3] [Partial 3..7] [Opaque 7..20]
+        let mut spans = MaskSpans::new();
+        spans.push(MaskSpan { start: 0, end: 3, kind: SpanKind::Transparent });
+        spans.push(MaskSpan { start: 3, end: 7, kind: SpanKind::Partial });
+        spans.push(MaskSpan { start: 7, end: 20, kind: SpanKind::Opaque });
+
+        spans.align_to(4);
+
+        // Partial should expand: start 3→0, end 7→8
+        // Transparent shrinks to zero (removed), Opaque shrinks from 7→8
+        // Result: [Partial 0..8] [Opaque 8..20]
+        assert_eq!(spans.len(), 2, "spans: {:?}", spans);
+        let v: Vec<(u32, u32, SpanKind)> =
+            spans.iter().map(|s| (s.start, s.end, s.kind)).collect();
+        assert_eq!(v[0], (0, 8, SpanKind::Partial));
+        assert_eq!(v[1], (8, 20, SpanKind::Opaque));
+    }
+
+    #[test]
+    fn align_preserves_coverage() {
+        // Alignment must not change total pixel coverage
+        let mut spans = MaskSpans::new();
+        spans.push(MaskSpan { start: 0, end: 15, kind: SpanKind::Transparent });
+        spans.push(MaskSpan { start: 15, end: 185, kind: SpanKind::Opaque });
+        spans.push(MaskSpan { start: 185, end: 200, kind: SpanKind::Transparent });
+
+        let total_before: u32 = spans.iter().map(|s| s.end - s.start).sum();
+        spans.align_to(4);
+        let total_after: u32 = spans.iter().map(|s| s.end - s.start).sum();
+        assert_eq!(total_before, total_after, "coverage changed after alignment");
+    }
+
+    #[test]
+    fn align_partial_boundaries_are_multiples() {
+        let mask = RoundedRectMask::uniform(200, 200, 40.0);
+        let mut row = vec![0.0f32; 200];
+        let mut spans = mask.mask_spans(&mut row, 5);
+        spans.align_to(4);
+        for s in spans.iter() {
+            if s.kind == SpanKind::Partial {
+                assert_eq!(
+                    s.start % 4, 0,
+                    "Partial span start {} not aligned to 4",
+                    s.start
+                );
+                // end can be width (200) which is already aligned
+                assert!(
+                    s.end % 4 == 0 || s.end == 200,
+                    "Partial span end {} not aligned to 4",
+                    s.end
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn align_correctness_with_real_mask() {
+        // apply_mask_spans uses align_to internally — verify it still matches
+        // the naive fill+mask_row approach
+        let mask = RoundedRectMask::uniform(200, 200, 40.0);
+        for y in [0, 3, 10, 39, 100, 160, 195, 199] {
+            let mut pixels1 = vec![0.7f32; 800];
+            let mut mask_buf1 = vec![0.0f32; 200];
+            let fill = mask.fill_mask_row(&mut mask_buf1, y);
+            match fill {
+                MaskFill::AllOpaque => {}
+                MaskFill::AllTransparent => pixels1.fill(0.0),
+                MaskFill::Partial => crate::mask_row(&mut pixels1, &mask_buf1),
+            }
+
+            let mut pixels2 = vec![0.7f32; 800];
+            let mut mask_buf2 = vec![0.0f32; 200];
+            crate::apply_mask_spans(&mut pixels2, &mut mask_buf2, &mask, y);
+
+            for (i, (a, b)) in pixels1.iter().zip(pixels2.iter()).enumerate() {
+                assert!(
+                    (a - b).abs() < 1e-6,
+                    "mismatch at y={y} i={i}: naive={a}, spans={b}"
                 );
             }
         }

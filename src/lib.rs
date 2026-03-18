@@ -219,7 +219,8 @@ pub fn apply_mask_spans(
     );
     assert_eq!(fg.len() % 4, 0, "fg length must be divisible by 4");
 
-    let spans = mask.mask_spans(mask_buf, y);
+    let mut spans = mask.mask_spans(mask_buf, y);
+    spans.align_to(mask::mask_pixel_align());
 
     for span in spans.iter() {
         let px_start = span.start as usize;
