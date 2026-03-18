@@ -365,6 +365,72 @@ impl RoundedRectMask {
         let r = (width.min(height) as f32) / 2.0;
         Self::new(width, height, [r; 4])
     }
+
+    /// Fill a sub-range `[x_start..x_end)` of the mask buffer for row `y`.
+    ///
+    /// Same per-pixel logic as `fill_mask_row` but restricted to the given columns.
+    /// Pixels outside corner arcs are set to 1.0; corner-affected pixels get AA coverage.
+    fn fill_mask_region(&self, dst: &mut [f32], y: u32, x_start: u32, x_end: u32) {
+        let h = self.height as f32;
+        let yf = y as f32 + 0.5;
+        let xs = x_start as usize;
+        let xe = x_end as usize;
+
+        // Start with opaque
+        dst[xs..xe].fill(1.0);
+
+        for (i, &(cx, cy)) in self.centers.iter().enumerate() {
+            let r = self.radii[i];
+            if r <= 0.0 {
+                continue;
+            }
+
+            let in_corner_y = match i {
+                0 => yf < r,
+                1 => yf < r,
+                2 => yf > h - r,
+                3 => yf > h - r,
+                _ => false,
+            };
+            if !in_corner_y {
+                continue;
+            }
+
+            let dy = yf - cy;
+            let dy2 = dy * dy;
+            let r_inner = r - 0.5;
+            let r_outer = r + 0.5;
+            let r_inner2 = r_inner * r_inner;
+            let r_outer2 = r_outer * r_outer;
+
+            #[allow(clippy::needless_range_loop)]
+            for x in xs..xe {
+                let xf = x as f32 + 0.5;
+                let dx = xf - cx;
+
+                let in_corner_x = match i {
+                    0 => xf < cx,
+                    1 => xf > cx,
+                    2 => xf > cx,
+                    3 => xf < cx,
+                    _ => false,
+                };
+                if !in_corner_x {
+                    continue;
+                }
+
+                let dist2 = dx * dx + dy2;
+
+                if dist2 >= r_outer2 {
+                    dst[x] = 0.0;
+                } else if dist2 > r_inner2 {
+                    let dist = libm::sqrtf(dist2);
+                    let coverage = r_outer - dist;
+                    dst[x] = coverage.clamp(0.0, 1.0);
+                }
+            }
+        }
+    }
 }
 
 impl MaskSource for RoundedRectMask {
@@ -496,8 +562,8 @@ impl MaskSource for RoundedRectMask {
         // Compute the x-extents affected by each active corner.
         // Left side: affected by top-left (i=0) or bottom-left (i=3)
         // Right side: affected by top-right (i=1) or bottom-right (i=2)
-        let mut left_end = 0u32; // rightmost pixel affected by left corners
-        let mut right_start = w; // leftmost pixel affected by right corners
+        let mut left_end = 0u32;
+        let mut right_start = w;
 
         for (i, &(cx, _cy)) in self.centers.iter().enumerate() {
             let r = self.radii[i];
@@ -528,34 +594,53 @@ impl MaskSource for RoundedRectMask {
 
             match i {
                 0 | 3 => {
-                    // Left corner: affects 0..ceil(cx + x_extent)
-                    let end = ((cx + x_extent).ceil() as u32).min(w);
-                    left_end = left_end.max(end);
+                    // Left corners: fill_mask_row checks in_corner_x as xf < cx,
+                    // and scans 0..ceil(cx + x_extent). But only pixels with
+                    // xf < cx are modified. The rightmost such pixel has
+                    // x = ceil(cx - 0.5) - 1, so exclusive end = ceil(cx - 0.5).
+                    // Use x_extent to also skip rows where the arc doesn't reach.
+                    if x_extent > 0.0 {
+                        let end = ((cx - 0.5).ceil().max(0.0) as u32).min(w);
+                        left_end = left_end.max(end);
+                    }
                 }
                 1 | 2 => {
-                    // Right corner: affects floor(cx - x_extent)..width
-                    let start = ((cx - x_extent).floor().max(0.0)) as u32;
-                    right_start = right_start.min(start);
+                    // Right corners: in_corner_x checks xf > cx. The leftmost
+                    // such pixel has x + 0.5 > cx, so x >= ceil(cx - 0.5).
+                    // Pixel index: floor(cx + 0.5) = the first pixel with center > cx.
+                    if x_extent > 0.0 {
+                        let start = ((cx + 0.5).floor().max(0.0)) as u32;
+                        right_start = right_start.min(start);
+                    }
                 }
                 _ => {}
             }
         }
 
-        // Fill the mask buffer (needed for partial spans)
-        let fill = self.fill_mask_row(dst, y);
-        if fill == MaskFill::AllOpaque {
+        // If no corners affected this row, it's all opaque
+        if left_end == 0 && right_start == w {
             return MaskSpans::uniform(w, SpanKind::Opaque);
         }
 
-        // Build spans: [left partial] [opaque center] [right partial]
         // Clamp so left_end <= right_start
         if left_end > right_start {
-            // Corners overlap — entire row is partial
+            // Corners overlap — fill entire row, return single partial span
+            self.fill_mask_row(dst, y);
             let mut spans = MaskSpans::new();
             spans.push(MaskSpan { start: 0, end: w, kind: SpanKind::Partial });
             return spans;
         }
 
+        // Fill only the partial regions of the mask buffer, not the entire row.
+        // The opaque center (left_end..right_start) is never read by apply_mask_spans.
+        if left_end > 0 {
+            self.fill_mask_region(dst, y, 0, left_end);
+        }
+        if right_start < w {
+            self.fill_mask_region(dst, y, right_start, w);
+        }
+
+        // Build spans: [left partial] [opaque center] [right partial]
         let mut spans = MaskSpans::new();
 
         if left_end > 0 {
