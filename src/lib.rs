@@ -81,6 +81,27 @@ pub enum BlendMode {
     Difference,
     /// Exclusion: Src + Dst - 2 * Src * Dst.
     Exclusion,
+
+    // === Additional separable modes ===
+    /// Linear burn: max(0, Src + Dst - 1). Additive darken.
+    LinearBurn,
+    /// Linear dodge: min(1, Src + Dst). Additive lighten.
+    LinearDodge,
+    /// Vivid light: ColorBurn(2·Src) if Src < 0.5, ColorDodge(2·Src - 1) otherwise.
+    VividLight,
+    /// Linear light: LinearBurn(2·Src) if Src < 0.5, LinearDodge(2·Src - 1) otherwise.
+    LinearLight,
+    /// Pin light: Darken(2·Src) if Src < 0.5, Lighten(2·Src - 1) otherwise.
+    PinLight,
+    /// Hard mix: 0 or 1 per channel (threshold via VividLight).
+    HardMix,
+    /// Divide: min(1, Dst / Src). Flat-field correction.
+    Divide,
+    /// Subtract: max(0, Dst - Src).
+    Subtract,
+    /// Plus (SVG/CSS): clamp(S + D, 0, 1) on premultiplied values directly.
+    /// Unlike artistic modes, this operates on premultiplied data without unpremultiply.
+    Plus,
 }
 
 /// Blend foreground over background in-place.
@@ -147,7 +168,11 @@ pub fn blend_row_solid_opaque(fg: &mut [f32], pixel: &[f32; 4], mode: BlendMode)
 /// Panics if `fg.len() != mask.len() * 4` or `fg.len()` is not divisible by 4.
 #[inline]
 pub fn mask_row(fg: &mut [f32], mask: &[f32]) {
-    assert_eq!(fg.len(), mask.len() * 4, "fg must have 4× as many elements as mask");
+    assert_eq!(
+        fg.len(),
+        mask.len() * 4,
+        "fg must have 4× as many elements as mask"
+    );
     assert_eq!(fg.len() % 4, 0, "fg length must be divisible by 4");
     simd::mask_row_apply(fg, mask);
 }
@@ -227,8 +252,7 @@ mod tests {
         ];
         let bg = [
             0.0, 0.0, 1.0, 1.0, // opaque blue
-            0.0, 0.0, 1.0, 1.0,
-            0.0, 0.0, 1.0, 1.0,
+            0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0,
         ];
         blend_row(&mut fg, &bg, BlendMode::SrcOver);
 
@@ -420,6 +444,152 @@ mod tests {
         assert!((fg[0] - 0.5).abs() < 1e-6); // 0.5 + 0.4 - 2*0.2 = 0.5
         assert!((fg[1] - 0.54).abs() < 1e-6); // 0.3 + 0.6 - 2*0.18 = 0.54
         assert!((fg[2] - 0.74).abs() < 1e-6); // 0.1 + 0.8 - 2*0.08 = 0.74
+        assert!((fg[3] - 1.0).abs() < 1e-6);
+    }
+
+    // === Additional blend mode tests ===
+
+    #[test]
+    fn linear_burn_mode() {
+        // Both opaque → max(0, s + d - 1)
+        let mut fg = [0.8, 0.3, 0.1, 1.0];
+        let bg = [0.4, 0.6, 0.2, 1.0];
+        blend_row(&mut fg, &bg, BlendMode::LinearBurn);
+        assert!((fg[0] - 0.2).abs() < 1e-6); // 0.8+0.4-1 = 0.2
+        assert!((fg[1] - 0.0).abs() < 1e-6); // 0.3+0.6-1 = -0.1 → 0
+        assert!((fg[2] - 0.0).abs() < 1e-6); // 0.1+0.2-1 = -0.7 → 0
+        assert!((fg[3] - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn linear_dodge_mode() {
+        // Both opaque → min(1, s + d)
+        let mut fg = [0.3, 0.7, 0.9, 1.0];
+        let bg = [0.4, 0.6, 0.2, 1.0];
+        blend_row(&mut fg, &bg, BlendMode::LinearDodge);
+        assert!((fg[0] - 0.7).abs() < 1e-6); // 0.3+0.4 = 0.7
+        assert!((fg[1] - 1.0).abs() < 1e-6); // 0.7+0.6 = 1.3 → 1
+        assert!((fg[2] - 1.0).abs() < 1e-6); // 0.9+0.2 = 1.1 → 1
+        assert!((fg[3] - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn subtract_mode() {
+        // Both opaque → max(0, d - s)
+        let mut fg = [0.3, 0.7, 0.1, 1.0];
+        let bg = [0.5, 0.2, 0.8, 1.0];
+        blend_row(&mut fg, &bg, BlendMode::Subtract);
+        assert!((fg[0] - 0.2).abs() < 1e-6); // 0.5-0.3 = 0.2
+        assert!((fg[1] - 0.0).abs() < 1e-6); // 0.2-0.7 → 0
+        assert!((fg[2] - 0.7).abs() < 1e-6); // 0.8-0.1 = 0.7
+        assert!((fg[3] - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn divide_mode() {
+        // Both opaque → min(1, d / s)
+        let mut fg = [0.5, 0.8, 0.1, 1.0];
+        let bg = [0.25, 0.4, 0.5, 1.0];
+        blend_row(&mut fg, &bg, BlendMode::Divide);
+        assert!((fg[0] - 0.5).abs() < 1e-6); // 0.25/0.5 = 0.5
+        assert!((fg[1] - 0.5).abs() < 1e-6); // 0.4/0.8 = 0.5
+        assert!((fg[2] - 1.0).abs() < 1e-6); // 0.5/0.1 = 5.0 → 1
+        assert!((fg[3] - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn plus_mode_premul() {
+        // Plus operates on premultiplied values directly
+        let mut fg = [0.3, 0.2, 0.0, 0.5];
+        let bg = [0.0, 0.4, 0.3, 0.6];
+        blend_row(&mut fg, &bg, BlendMode::Plus);
+        assert!((fg[0] - 0.3).abs() < 1e-6);
+        assert!((fg[1] - 0.6).abs() < 1e-6);
+        assert!((fg[2] - 0.3).abs() < 1e-6);
+        assert!((fg[3] - 1.0).abs() < 1e-6); // 0.5+0.6 = 1.1 → 1.0
+    }
+
+    #[test]
+    fn plus_commutative() {
+        let a = [0.3, 0.2, 0.1, 0.5];
+        let b = [0.1, 0.4, 0.3, 0.6];
+        let mut fg1 = a;
+        blend_row(&mut fg1, &b, BlendMode::Plus);
+        let mut fg2 = b;
+        blend_row(&mut fg2, &a, BlendMode::Plus);
+        for i in 0..4 {
+            assert!((fg1[i] - fg2[i]).abs() < 1e-6, "Plus not commutative at {i}");
+        }
+    }
+
+    #[test]
+    fn multiply_white_identity() {
+        // Multiply with white = identity
+        let original = [0.3, 0.5, 0.8, 1.0];
+        let mut fg = original;
+        let bg = [1.0, 1.0, 1.0, 1.0];
+        blend_row(&mut fg, &bg, BlendMode::Multiply);
+        for i in 0..4 {
+            assert!((fg[i] - original[i]).abs() < 1e-6, "Multiply(white) not identity at {i}");
+        }
+    }
+
+    #[test]
+    fn subtract_self_is_zero() {
+        let color = [0.5, 0.3, 0.8, 1.0];
+        let mut fg = color;
+        let bg = color;
+        blend_row(&mut fg, &bg, BlendMode::Subtract);
+        assert!((fg[0] - 0.0).abs() < 1e-6);
+        assert!((fg[1] - 0.0).abs() < 1e-6);
+        assert!((fg[2] - 0.0).abs() < 1e-6);
+        assert!((fg[3] - 1.0).abs() < 1e-6); // alpha: SrcOver formula
+    }
+
+    #[test]
+    fn vivid_light_mode() {
+        // Both opaque, s=0.25 (<0.5) → ColorBurn(0.5, d)
+        let mut fg = [0.25, 0.75, 0.5, 1.0];
+        let bg = [0.8, 0.4, 0.6, 1.0];
+        blend_row(&mut fg, &bg, BlendMode::VividLight);
+        // s=0.25: ColorBurn(2*0.25=0.5, 0.8) = 1-(1-0.8)/0.5 = 1-0.4 = 0.6
+        assert!((fg[0] - 0.6).abs() < 1e-5);
+        assert!((fg[3] - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn hard_mix_mode() {
+        // Both opaque: threshold via VividLight → 0 or 1
+        let mut fg = [0.9, 0.1, 0.5, 1.0];
+        let bg = [0.8, 0.2, 0.5, 1.0];
+        blend_row(&mut fg, &bg, BlendMode::HardMix);
+        assert!(fg[0] == 0.0 || fg[0] == 1.0, "HardMix must be 0 or 1, got {}", fg[0]);
+        assert!(fg[1] == 0.0 || fg[1] == 1.0, "HardMix must be 0 or 1, got {}", fg[1]);
+        assert!((fg[3] - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn pin_light_mode() {
+        // Both opaque, s=0.2 → Darken(2*0.2, d) = min(0.4, d)
+        let mut fg = [0.2, 0.8, 0.5, 1.0];
+        let bg = [0.6, 0.3, 0.5, 1.0];
+        blend_row(&mut fg, &bg, BlendMode::PinLight);
+        assert!((fg[0] - 0.4).abs() < 1e-6); // min(0.4, 0.6) = 0.4
+        // s=0.8 → Lighten(2*0.8-1, d) = max(0.6, 0.3) = 0.6
+        assert!((fg[1] - 0.6).abs() < 1e-6);
+        assert!((fg[3] - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn linear_light_mode() {
+        // Both opaque
+        // s=0.25 → LinearBurn(0.5, d) = max(0, 0.5 + d - 1)
+        let mut fg = [0.25, 0.75, 0.5, 1.0];
+        let bg = [0.8, 0.4, 0.6, 1.0];
+        blend_row(&mut fg, &bg, BlendMode::LinearLight);
+        assert!((fg[0] - 0.3).abs() < 1e-5); // max(0, 0.5+0.8-1) = 0.3
+        // s=0.75 → LinearDodge(0.5, d) = min(1, 0.5+d)
+        assert!((fg[1] - 0.9).abs() < 1e-5); // min(1, 0.5+0.4) = 0.9
         assert!((fg[3] - 1.0).abs() < 1e-6);
     }
 

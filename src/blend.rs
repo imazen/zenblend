@@ -33,6 +33,15 @@ pub(crate) fn dispatch_blend_row(fg: &mut [f32], bg: &[f32], mode: BlendMode) {
         BlendMode::ColorBurn => blend_color_burn(fg, bg),
         BlendMode::Difference => blend_difference(fg, bg),
         BlendMode::Exclusion => blend_exclusion(fg, bg),
+        BlendMode::LinearBurn => blend_linear_burn(fg, bg),
+        BlendMode::LinearDodge => blend_linear_dodge(fg, bg),
+        BlendMode::VividLight => blend_vivid_light(fg, bg),
+        BlendMode::LinearLight => blend_linear_light(fg, bg),
+        BlendMode::PinLight => blend_pin_light(fg, bg),
+        BlendMode::HardMix => blend_hard_mix(fg, bg),
+        BlendMode::Divide => blend_divide(fg, bg),
+        BlendMode::Subtract => blend_subtract(fg, bg),
+        BlendMode::Plus => blend_plus(fg, bg),
         // non_exhaustive: future variants
         #[allow(unreachable_patterns)]
         _ => unimplemented!("blend mode not yet implemented"),
@@ -188,6 +197,45 @@ fn dispatch_blend_pixel(fg: &mut [f32; 4], bg: &[f32; 4], mode: BlendMode) {
             if diff < 0.0 { -diff } else { diff }
         }),
         BlendMode::Exclusion => blend_artistic_pixel(fg, bg, |s, d| s + d - 2.0 * s * d),
+        BlendMode::LinearBurn => {
+            blend_artistic_pixel(fg, bg, |s, d| (s + d - 1.0).max(0.0));
+        }
+        BlendMode::LinearDodge => {
+            blend_artistic_pixel(fg, bg, |s, d| (s + d).min(1.0));
+        }
+        BlendMode::VividLight => blend_artistic_pixel(fg, bg, vivid_light_fn),
+        BlendMode::LinearLight => blend_artistic_pixel(fg, bg, |s, d| {
+            if s < 0.5 {
+                // LinearBurn(2·s, d) = max(0, 2s + d - 1)
+                (2.0 * s + d - 1.0).max(0.0)
+            } else {
+                // LinearDodge(2s-1, d) = min(1, 2s - 1 + d)
+                (2.0 * s - 1.0 + d).min(1.0)
+            }
+        }),
+        BlendMode::PinLight => blend_artistic_pixel(fg, bg, |s, d| {
+            if s < 0.5 {
+                // Darken(2·s, d)
+                d.min(2.0 * s)
+            } else {
+                // Lighten(2s-1, d)
+                d.max(2.0 * s - 1.0)
+            }
+        }),
+        BlendMode::HardMix => blend_artistic_pixel(fg, bg, |s, d| {
+            if vivid_light_fn(s, d) < 0.5 { 0.0 } else { 1.0 }
+        }),
+        BlendMode::Divide => blend_artistic_pixel(fg, bg, |s, d| {
+            if s <= 0.0 {
+                1.0 // d / 0 → 1.0 (clamped)
+            } else {
+                (d / s).min(1.0)
+            }
+        }),
+        BlendMode::Subtract => {
+            blend_artistic_pixel(fg, bg, |s, d| (d - s).max(0.0));
+        }
+        BlendMode::Plus => blend_plus_pixel(fg, bg),
         _ => {} // Clear, Src handled by caller; unknown modes are no-op
     }
 }
@@ -426,3 +474,73 @@ artistic_row!(blend_difference, |s: f32, d: f32| {
     if diff < 0.0 { -diff } else { diff }
 });
 artistic_row!(blend_exclusion, |s: f32, d: f32| s + d - 2.0 * s * d);
+artistic_row!(blend_linear_burn, |s: f32, d: f32| (s + d - 1.0).max(0.0));
+artistic_row!(blend_linear_dodge, |s: f32, d: f32| (s + d).min(1.0));
+artistic_row!(blend_vivid_light, vivid_light_fn);
+artistic_row!(blend_linear_light, |s: f32, d: f32| {
+    if s < 0.5 {
+        (2.0 * s + d - 1.0).max(0.0)
+    } else {
+        (2.0 * s - 1.0 + d).min(1.0)
+    }
+});
+artistic_row!(blend_pin_light, |s: f32, d: f32| {
+    if s < 0.5 {
+        d.min(2.0 * s)
+    } else {
+        d.max(2.0 * s - 1.0)
+    }
+});
+artistic_row!(blend_hard_mix, |s: f32, d: f32| {
+    if vivid_light_fn(s, d) < 0.5 { 0.0 } else { 1.0 }
+});
+artistic_row!(blend_divide, |s: f32, d: f32| {
+    if s <= 0.0 { 1.0 } else { (d / s).min(1.0) }
+});
+artistic_row!(blend_subtract, |s: f32, d: f32| (d - s).max(0.0));
+
+/// VividLight channel function: shared by VividLight and HardMix.
+#[inline]
+fn vivid_light_fn(s: f32, d: f32) -> f32 {
+    if s < 0.5 {
+        // ColorBurn(2·s, d) = 1 - (1-d)/(2s)
+        let s2 = 2.0 * s;
+        if d >= 1.0 {
+            1.0
+        } else if s2 <= 0.0 {
+            0.0
+        } else {
+            1.0 - ((1.0 - d) / s2).min(1.0)
+        }
+    } else {
+        // ColorDodge(2s-1, d) = d / (1-(2s-1)) = d / (2-2s)
+        let s2m1 = 2.0 * s - 1.0;
+        if d <= 0.0 {
+            0.0
+        } else if s2m1 >= 1.0 {
+            1.0
+        } else {
+            (d / (1.0 - s2m1)).min(1.0)
+        }
+    }
+}
+
+/// Plus: premultiplied add with clamp. Does NOT unpremultiply.
+#[inline]
+fn blend_plus(fg: &mut [f32], bg: &[f32]) {
+    for (s, b) in fg.chunks_exact_mut(4).zip(bg.chunks_exact(4)) {
+        s[0] = (s[0] + b[0]).min(1.0);
+        s[1] = (s[1] + b[1]).min(1.0);
+        s[2] = (s[2] + b[2]).min(1.0);
+        s[3] = (s[3] + b[3]).min(1.0);
+    }
+}
+
+/// Plus single pixel (for solid-pixel dispatch path).
+#[inline]
+fn blend_plus_pixel(fg: &mut [f32; 4], bg: &[f32; 4]) {
+    fg[0] = (fg[0] + bg[0]).min(1.0);
+    fg[1] = (fg[1] + bg[1]).min(1.0);
+    fg[2] = (fg[2] + bg[2]).min(1.0);
+    fg[3] = (fg[3] + bg[3]).min(1.0);
+}
