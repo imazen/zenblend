@@ -57,3 +57,32 @@ pub(super) fn mask_row_apply_wide(fg: &mut [f32], mask: &[f32]) {
         pixel.copy_from_slice(&arr);
     }
 }
+
+/// Per-pixel mask multiply on RGB only, alpha untouched, wide f32x4.
+#[inline]
+pub(super) fn mask_row_rgb_apply_wide(fg: &mut [f32], mask: &[f32]) {
+    for (pixel, &m) in fg.chunks_exact_mut(4).zip(mask.iter()) {
+        let fg_pixel = wide::f32x4::from([pixel[0], pixel[1], pixel[2], pixel[3]]);
+        let mask_vec = wide::f32x4::from([m, m, m, 1.0]);
+        let result = fg_pixel * mask_vec;
+        let arr: [f32; 4] = result.into();
+        pixel.copy_from_slice(&arr);
+    }
+}
+
+/// Linearly interpolate between two RGBA rows, wide f32x4.
+#[inline]
+pub(super) fn lerp_row_apply_wide(a: &[f32], b: &[f32], t: &[f32], out: &mut [f32]) {
+    for ((a_px, b_px), (&tv, out_px)) in a
+        .chunks_exact(4)
+        .zip(b.chunks_exact(4))
+        .zip(t.iter().zip(out.chunks_exact_mut(4)))
+    {
+        let a_vec = wide::f32x4::from([a_px[0], a_px[1], a_px[2], a_px[3]]);
+        let b_vec = wide::f32x4::from([b_px[0], b_px[1], b_px[2], b_px[3]]);
+        let t_vec = wide::f32x4::splat(tv);
+        let result = a_vec + (b_vec - a_vec) * t_vec;
+        let arr: [f32; 4] = result.into();
+        out_px.copy_from_slice(&arr);
+    }
+}

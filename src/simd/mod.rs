@@ -50,3 +50,13 @@ pub(crate) fn blend_src_over_solid_opaque(fg: &mut [f32], pixel: &[f32; 4]) {
 pub(crate) fn mask_row_apply(fg: &mut [f32], mask: &[f32]) {
     archmage::incant!(mask_row_apply(fg, mask))
 }
+
+/// Multiply RGB channels by per-pixel mask, leave alpha untouched.
+pub(crate) fn mask_row_rgb_apply(fg: &mut [f32], mask: &[f32]) {
+    archmage::incant!(mask_row_rgb_apply(fg, mask))
+}
+
+/// Linearly interpolate between two RGBA rows using per-pixel factor.
+pub(crate) fn lerp_row_apply(a: &[f32], b: &[f32], t: &[f32], out: &mut [f32]) {
+    archmage::incant!(lerp_row_apply(a, b, t, out))
+}

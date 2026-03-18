@@ -192,6 +192,54 @@ pub fn mask_row_constant(fg: &mut [f32], alpha: f32) {
     }
 }
 
+/// Multiply R, G, B by per-pixel mask; leave alpha untouched.
+///
+/// `mask` has one `f32` per pixel (`mask.len() == fg.len() / 4`).
+/// Each mask value is multiplied against the R, G, B channels of the
+/// corresponding pixel while the alpha channel is preserved.
+///
+/// Use case: gain map application, vignette without opacity change,
+/// color grading masks.
+///
+/// # Panics
+///
+/// Panics if `fg.len() != mask.len() * 4` or `fg.len()` is not divisible by 4.
+#[inline]
+pub fn mask_row_rgb(fg: &mut [f32], mask: &[f32]) {
+    assert_eq!(
+        fg.len(),
+        mask.len() * 4,
+        "fg must have 4× as many elements as mask"
+    );
+    assert_eq!(fg.len() % 4, 0, "fg length must be divisible by 4");
+    simd::mask_row_rgb_apply(fg, mask);
+}
+
+/// Linearly interpolate between two RGBA rows using a per-pixel factor.
+///
+/// `out[px*4+c] = a[px*4+c] + (b[px*4+c] - a[px*4+c]) * t[px]`
+///
+/// `t` has one `f32` per pixel. `a`, `b`, `out` have 4ch RGBA.
+/// When `t=0` → `a`, when `t=1` → `b`, when `t=0.5` → midpoint.
+///
+/// Use case: mask-gated adjustments — interpolate between original and adjusted image.
+///
+/// # Panics
+///
+/// Panics if slices have mismatched lengths or aren't divisible by 4.
+#[inline]
+pub fn lerp_row(a: &[f32], b: &[f32], t: &[f32], out: &mut [f32]) {
+    assert_eq!(a.len(), b.len(), "a and b must have equal length");
+    assert_eq!(a.len(), out.len(), "a and out must have equal length");
+    assert_eq!(
+        a.len(),
+        t.len() * 4,
+        "a must have 4× as many elements as t"
+    );
+    assert_eq!(a.len() % 4, 0, "length must be divisible by 4");
+    simd::lerp_row_apply(a, b, t, out);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -615,6 +663,114 @@ mod tests {
         blend_row(&mut fg, &bg, BlendMode::DstOver);
         for i in 0..4 {
             assert!((fg[i] - bg[i]).abs() < 1e-6);
+        }
+    }
+
+    // === mask_row_rgb tests ===
+
+    #[test]
+    fn mask_row_rgb_identity() {
+        let mut fg = [0.3, 0.5, 0.8, 0.9];
+        let mask = [1.0];
+        mask_row_rgb(&mut fg, &mask);
+        assert_eq!(fg, [0.3, 0.5, 0.8, 0.9]); // identity, alpha preserved
+    }
+
+    #[test]
+    fn mask_row_rgb_zero_preserves_alpha() {
+        let mut fg = [0.3, 0.5, 0.8, 0.9];
+        let mask = [0.0];
+        mask_row_rgb(&mut fg, &mask);
+        assert_eq!(fg[0], 0.0);
+        assert_eq!(fg[1], 0.0);
+        assert_eq!(fg[2], 0.0);
+        assert_eq!(fg[3], 0.9); // alpha untouched
+    }
+
+    #[test]
+    fn mask_row_rgb_half() {
+        let mut fg = [0.4, 0.6, 0.8, 1.0];
+        let mask = [0.5];
+        mask_row_rgb(&mut fg, &mask);
+        assert!((fg[0] - 0.2).abs() < 1e-6);
+        assert!((fg[1] - 0.3).abs() < 1e-6);
+        assert!((fg[2] - 0.4).abs() < 1e-6);
+        assert_eq!(fg[3], 1.0); // alpha untouched
+    }
+
+    #[test]
+    fn mask_row_rgb_multi_pixel() {
+        let mut fg = [
+            0.4, 0.6, 0.8, 1.0,
+            0.2, 0.4, 0.6, 0.5,
+            0.1, 0.3, 0.5, 0.8,
+        ];
+        let mask = [0.5, 1.0, 0.0];
+        mask_row_rgb(&mut fg, &mask);
+        // Pixel 0: RGB halved, alpha preserved
+        assert!((fg[0] - 0.2).abs() < 1e-6);
+        assert_eq!(fg[3], 1.0);
+        // Pixel 1: identity
+        assert!((fg[4] - 0.2).abs() < 1e-6);
+        assert_eq!(fg[7], 0.5);
+        // Pixel 2: RGB zeroed, alpha preserved
+        assert_eq!(fg[8], 0.0);
+        assert_eq!(fg[11], 0.8);
+    }
+
+    // === lerp_row tests ===
+
+    #[test]
+    fn lerp_row_t_zero_is_a() {
+        let a = [0.1, 0.2, 0.3, 0.4];
+        let b = [0.9, 0.8, 0.7, 0.6];
+        let t = [0.0];
+        let mut out = [0.0; 4];
+        lerp_row(&a, &b, &t, &mut out);
+        for i in 0..4 {
+            assert!((out[i] - a[i]).abs() < 1e-6, "t=0 should give a[{i}]");
+        }
+    }
+
+    #[test]
+    fn lerp_row_t_one_is_b() {
+        let a = [0.1, 0.2, 0.3, 0.4];
+        let b = [0.9, 0.8, 0.7, 0.6];
+        let t = [1.0];
+        let mut out = [0.0; 4];
+        lerp_row(&a, &b, &t, &mut out);
+        for i in 0..4 {
+            assert!((out[i] - b[i]).abs() < 1e-6, "t=1 should give b[{i}]");
+        }
+    }
+
+    #[test]
+    fn lerp_row_t_half_is_midpoint() {
+        let a = [0.0, 0.2, 0.4, 0.6];
+        let b = [1.0, 0.8, 0.6, 0.4];
+        let t = [0.5];
+        let mut out = [0.0; 4];
+        lerp_row(&a, &b, &t, &mut out);
+        assert!((out[0] - 0.5).abs() < 1e-6);
+        assert!((out[1] - 0.5).abs() < 1e-6);
+        assert!((out[2] - 0.5).abs() < 1e-6);
+        assert!((out[3] - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn lerp_row_multi_pixel() {
+        let a = [0.0, 0.0, 0.0, 0.0,  1.0, 1.0, 1.0, 1.0];
+        let b = [1.0, 1.0, 1.0, 1.0,  0.0, 0.0, 0.0, 0.0];
+        let t = [0.25, 0.75];
+        let mut out = [0.0; 8];
+        lerp_row(&a, &b, &t, &mut out);
+        // Pixel 0: 0 + (1-0)*0.25 = 0.25
+        for c in 0..4 {
+            assert!((out[c] - 0.25).abs() < 1e-6);
+        }
+        // Pixel 1: 1 + (0-1)*0.75 = 0.25
+        for c in 4..8 {
+            assert!((out[c] - 0.25).abs() < 1e-6);
         }
     }
 }
