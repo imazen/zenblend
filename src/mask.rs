@@ -224,8 +224,9 @@ pub trait MaskSource {
     /// pixels are in the opaque span — only the corner edges need actual multiply.
     ///
     /// The default implementation calls [`fill_mask_row`](Self::fill_mask_row) and
-    /// scans the result. Override for masks that can compute spans analytically
-    /// (e.g., rounded rectangles know their corner extents from geometry).
+    /// returns a single span. Override for masks that can compute spans
+    /// analytically (e.g., rounded rectangles know their corner extents from
+    /// geometry and only fill partial sub-ranges).
     ///
     /// Spans must be non-overlapping, ordered by `start`, and cover `[0, width)`.
     fn mask_spans(&self, dst: &mut [f32], y: u32) -> MaskSpans {
@@ -234,63 +235,9 @@ pub trait MaskSource {
         match fill {
             MaskFill::AllOpaque => MaskSpans::uniform(width, SpanKind::Opaque),
             MaskFill::AllTransparent => MaskSpans::uniform(width, SpanKind::Transparent),
-            MaskFill::Partial => scan_spans(dst),
+            MaskFill::Partial => MaskSpans::uniform(width, SpanKind::Partial),
         }
     }
-}
-
-/// Scan a filled mask buffer and extract contiguous spans.
-fn scan_spans(mask: &[f32]) -> MaskSpans {
-    let width = mask.len() as u32;
-    let mut spans = MaskSpans::new();
-    if width == 0 {
-        return spans;
-    }
-
-    let classify = |v: f32| -> SpanKind {
-        if v >= 1.0 {
-            SpanKind::Opaque
-        } else if v <= 0.0 {
-            SpanKind::Transparent
-        } else {
-            SpanKind::Partial
-        }
-    };
-
-    let mut current_kind = classify(mask[0]);
-    let mut span_start = 0u32;
-
-    for (i, &v) in mask.iter().enumerate().skip(1) {
-        let kind = classify(v);
-        if kind != current_kind {
-            // Merge adjacent partial spans with different kinds would be wrong;
-            // but we can stop early if we'd exceed capacity by merging remaining into Partial
-            if spans.len() >= 7 {
-                // Reserve last slot for the rest as Partial
-                spans.push(MaskSpan {
-                    start: span_start,
-                    end: width,
-                    kind: SpanKind::Partial,
-                });
-                return spans;
-            }
-            spans.push(MaskSpan {
-                start: span_start,
-                end: i as u32,
-                kind: current_kind,
-            });
-            current_kind = kind;
-            span_start = i as u32;
-        }
-    }
-
-    // Final span
-    spans.push(MaskSpan {
-        start: span_start,
-        end: width,
-        kind: current_kind,
-    });
-    spans
 }
 
 /// Antialiased rounded rectangle mask.
@@ -1217,15 +1164,17 @@ mod tests {
     }
 
     #[test]
-    fn spans_default_impl_scans_gradient() {
-        // LinearGradientMask uses the default scan_spans implementation
+    fn spans_default_impl_single_partial() {
+        // LinearGradientMask uses the default mask_spans (no analytical override),
+        // which returns a single Partial span for the whole row.
         let mask = LinearGradientMask::new(100, 1, (0.0, 0.5), (100.0, 0.5));
         let mut row = vec![0.0f32; 100];
         let spans = mask.mask_spans(&mut row, 0);
-        // Gradient: left is transparent, right is opaque, middle is partial
-        // With scan_spans, we get many tiny transitions. Just verify coverage.
-        let total: u32 = spans.iter().map(|s| s.end - s.start).sum();
-        assert_eq!(total, 100);
+        assert_eq!(spans.len(), 1);
+        let s = spans.iter().next().unwrap();
+        assert_eq!(s.kind, SpanKind::Partial);
+        assert_eq!(s.start, 0);
+        assert_eq!(s.end, 100);
     }
 
     #[test]
