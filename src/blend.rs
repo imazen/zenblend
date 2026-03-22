@@ -222,9 +222,15 @@ fn dispatch_blend_pixel(fg: &mut [f32; 4], bg: &[f32; 4], mode: BlendMode) {
                 d.max(2.0 * s - 1.0)
             }
         }),
-        BlendMode::HardMix => blend_artistic_pixel(fg, bg, |s, d| {
-            if vivid_light_fn(s, d) < 0.5 { 0.0 } else { 1.0 }
-        }),
+        BlendMode::HardMix => {
+            blend_artistic_pixel(
+                fg,
+                bg,
+                |s, d| {
+                    if vivid_light_fn(s, d) < 0.5 { 0.0 } else { 1.0 }
+                },
+            )
+        }
         BlendMode::Divide => blend_artistic_pixel(fg, bg, |s, d| {
             if s <= 0.0 {
                 1.0 // d / 0 → 1.0 (clamped)

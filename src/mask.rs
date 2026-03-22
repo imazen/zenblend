@@ -54,7 +54,11 @@ impl MaskSpans {
     /// Create an empty span list.
     pub fn new() -> Self {
         Self {
-            spans: [MaskSpan { start: 0, end: 0, kind: SpanKind::Opaque }; 8],
+            spans: [MaskSpan {
+                start: 0,
+                end: 0,
+                kind: SpanKind::Opaque,
+            }; 8],
             len: 0,
         }
     }
@@ -62,13 +66,20 @@ impl MaskSpans {
     /// Create a span list with a single span covering the full width.
     pub fn uniform(width: u32, kind: SpanKind) -> Self {
         let mut s = Self::new();
-        s.push(MaskSpan { start: 0, end: width, kind });
+        s.push(MaskSpan {
+            start: 0,
+            end: width,
+            kind,
+        });
         s
     }
 
     /// Add a span. Panics if capacity (8) is exceeded.
     pub fn push(&mut self, span: MaskSpan) {
-        assert!((self.len as usize) < self.spans.len(), "MaskSpans overflow (max 8)");
+        assert!(
+            (self.len as usize) < self.spans.len(),
+            "MaskSpans overflow (max 8)"
+        );
         self.spans[self.len as usize] = span;
         self.len += 1;
     }
@@ -198,9 +209,13 @@ impl Default for MaskSpans {
 /// on SIMD block boundaries, eliminating scalar tails in the mask multiply kernel.
 pub const fn mask_pixel_align() -> u32 {
     #[cfg(target_arch = "x86_64")]
-    { 2 }
+    {
+        2
+    }
     #[cfg(not(target_arch = "x86_64"))]
-    { 1 }
+    {
+        1
+    }
 }
 
 /// Row-level mask generator.
@@ -574,7 +589,11 @@ impl MaskSource for RoundedRectMask {
             // Corners overlap — fill entire row, return single partial span
             self.fill_mask_row(dst, y);
             let mut spans = MaskSpans::new();
-            spans.push(MaskSpan { start: 0, end: w, kind: SpanKind::Partial });
+            spans.push(MaskSpan {
+                start: 0,
+                end: w,
+                kind: SpanKind::Partial,
+            });
             return spans;
         }
 
@@ -1119,7 +1138,11 @@ mod tests {
         // Row 5: intersects top-left and top-right corners
         let spans = mask.mask_spans(&mut row, 5);
         // Should have: [partial left corner] [opaque center] [partial right corner]
-        assert!(spans.len() >= 2, "expected at least 2 spans, got {}", spans.len());
+        assert!(
+            spans.len() >= 2,
+            "expected at least 2 spans, got {}",
+            spans.len()
+        );
 
         let kinds: Vec<SpanKind> = spans.iter().map(|s| s.kind).collect();
         assert!(
@@ -1222,9 +1245,21 @@ mod tests {
     fn align_expands_partial_shrinks_neighbors() {
         // [Transparent 0..3] [Partial 3..7] [Opaque 7..20]
         let mut spans = MaskSpans::new();
-        spans.push(MaskSpan { start: 0, end: 3, kind: SpanKind::Transparent });
-        spans.push(MaskSpan { start: 3, end: 7, kind: SpanKind::Partial });
-        spans.push(MaskSpan { start: 7, end: 20, kind: SpanKind::Opaque });
+        spans.push(MaskSpan {
+            start: 0,
+            end: 3,
+            kind: SpanKind::Transparent,
+        });
+        spans.push(MaskSpan {
+            start: 3,
+            end: 7,
+            kind: SpanKind::Partial,
+        });
+        spans.push(MaskSpan {
+            start: 7,
+            end: 20,
+            kind: SpanKind::Opaque,
+        });
 
         spans.align_to(4);
 
@@ -1232,8 +1267,7 @@ mod tests {
         // Transparent shrinks to zero (removed), Opaque shrinks from 7→8
         // Result: [Partial 0..8] [Opaque 8..20]
         assert_eq!(spans.len(), 2, "spans: {:?}", spans);
-        let v: Vec<(u32, u32, SpanKind)> =
-            spans.iter().map(|s| (s.start, s.end, s.kind)).collect();
+        let v: Vec<(u32, u32, SpanKind)> = spans.iter().map(|s| (s.start, s.end, s.kind)).collect();
         assert_eq!(v[0], (0, 8, SpanKind::Partial));
         assert_eq!(v[1], (8, 20, SpanKind::Opaque));
     }
@@ -1242,14 +1276,29 @@ mod tests {
     fn align_preserves_coverage() {
         // Alignment must not change total pixel coverage
         let mut spans = MaskSpans::new();
-        spans.push(MaskSpan { start: 0, end: 15, kind: SpanKind::Transparent });
-        spans.push(MaskSpan { start: 15, end: 185, kind: SpanKind::Opaque });
-        spans.push(MaskSpan { start: 185, end: 200, kind: SpanKind::Transparent });
+        spans.push(MaskSpan {
+            start: 0,
+            end: 15,
+            kind: SpanKind::Transparent,
+        });
+        spans.push(MaskSpan {
+            start: 15,
+            end: 185,
+            kind: SpanKind::Opaque,
+        });
+        spans.push(MaskSpan {
+            start: 185,
+            end: 200,
+            kind: SpanKind::Transparent,
+        });
 
         let total_before: u32 = spans.iter().map(|s| s.end - s.start).sum();
         spans.align_to(4);
         let total_after: u32 = spans.iter().map(|s| s.end - s.start).sum();
-        assert_eq!(total_before, total_after, "coverage changed after alignment");
+        assert_eq!(
+            total_before, total_after,
+            "coverage changed after alignment"
+        );
     }
 
     #[test]
@@ -1261,7 +1310,8 @@ mod tests {
         for s in spans.iter() {
             if s.kind == SpanKind::Partial {
                 assert_eq!(
-                    s.start % 4, 0,
+                    s.start % 4,
+                    0,
                     "Partial span start {} not aligned to 4",
                     s.start
                 );

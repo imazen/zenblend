@@ -13,8 +13,12 @@ fn main() {
     println!("=== RoundedRect (analytical spans) ===");
     for &width in &[200, 1000, 4000] {
         for &radius in &[20.0, 50.0] {
-            bench_mask(&RoundedRectMask::uniform(width, width, radius), width, width,
-                &format!("r={radius:<5}"));
+            bench_mask(
+                &RoundedRectMask::uniform(width, width, radius),
+                width,
+                width,
+                &format!("r={radius:<5}"),
+            );
         }
     }
 

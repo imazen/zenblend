@@ -178,8 +178,14 @@ pub(crate) fn mask_row_rgb_apply_v3(_token: X64V3Token, fg: &mut [f32], mask: &[
     for (fg_chunk, mask_pair) in fg_chunks.iter_mut().zip(mask_chunks.iter()) {
         let fg_vec = _mm256_loadu_ps(fg_chunk);
         let mask_vec = _mm256_set_ps(
-            mask_pair[1], mask_pair[1], mask_pair[1], mask_pair[1],
-            mask_pair[0], mask_pair[0], mask_pair[0], mask_pair[0],
+            mask_pair[1],
+            mask_pair[1],
+            mask_pair[1],
+            mask_pair[1],
+            mask_pair[0],
+            mask_pair[0],
+            mask_pair[0],
+            mask_pair[0],
         );
         let masked = _mm256_mul_ps(fg_vec, mask_vec);
         // result = masked * blend_select + fg * alpha_select
@@ -224,8 +230,7 @@ pub(crate) fn lerp_row_apply_v3(
         let a_vec = _mm256_loadu_ps(a_chunk);
         let b_vec = _mm256_loadu_ps(b_chunk);
         let t_vec = _mm256_set_ps(
-            t_pair[1], t_pair[1], t_pair[1], t_pair[1],
-            t_pair[0], t_pair[0], t_pair[0], t_pair[0],
+            t_pair[1], t_pair[1], t_pair[1], t_pair[1], t_pair[0], t_pair[0], t_pair[0], t_pair[0],
         );
         let diff = _mm256_sub_ps(b_vec, a_vec);
         // out = a + diff * t = fmadd(diff, t, a)
