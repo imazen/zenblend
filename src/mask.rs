@@ -455,12 +455,12 @@ impl MaskSource for RoundedRectMask {
                 0 | 3 => {
                     // Left corners: affect pixels 0..cx+x_extent
                     let start = 0usize;
-                    let end = ((cx + x_extent_outer).ceil() as usize).min(self.width as usize);
+                    let end = (libm::ceilf(cx + x_extent_outer) as usize).min(self.width as usize);
                     (start, end)
                 }
                 1 | 2 => {
                     // Right corners: affect pixels cx-x_extent..width
-                    let start = ((cx - x_extent_outer).floor().max(0.0)) as usize;
+                    let start = (libm::floorf(cx - x_extent_outer).max(0.0)) as usize;
                     let end = self.width as usize;
                     (start, end)
                 }
@@ -562,7 +562,7 @@ impl MaskSource for RoundedRectMask {
                     // x = ceil(cx - 0.5) - 1, so exclusive end = ceil(cx - 0.5).
                     // Use x_extent to also skip rows where the arc doesn't reach.
                     if x_extent > 0.0 {
-                        let end = ((cx - 0.5).ceil().max(0.0) as u32).min(w);
+                        let end = (libm::ceilf(cx - 0.5).max(0.0) as u32).min(w);
                         left_end = left_end.max(end);
                     }
                 }
@@ -571,7 +571,7 @@ impl MaskSource for RoundedRectMask {
                     // such pixel has x + 0.5 > cx, so x >= ceil(cx - 0.5).
                     // Pixel index: floor(cx + 0.5) = the first pixel with center > cx.
                     if x_extent > 0.0 {
-                        let start = ((cx + 0.5).floor().max(0.0)) as u32;
+                        let start = (libm::floorf(cx + 0.5).max(0.0)) as u32;
                         right_start = right_start.min(start);
                     }
                 }
