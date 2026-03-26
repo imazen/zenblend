@@ -17,7 +17,6 @@
 //! All pixel data must be **premultiplied linear f32**, 4 channels (RGBA).
 //! Lengths must be equal and divisible by 4.
 
-#![cfg_attr(not(feature = "std"), no_std)]
 #![forbid(unsafe_code)]
 
 mod blend;
