@@ -522,6 +522,34 @@ mod tests {
     }
 
     #[test]
+    fn soft_light_mode() {
+        // W3C SoftLight formula, both opaque.
+        // s=0.3, d=0.8: s <= 0.5 → d - (1-2s)*d*(1-d) = 0.8 - 0.4*0.8*0.2 = 0.736
+        let mut fg = [0.3, 0.0, 0.0, 1.0];
+        let bg = [0.8, 0.0, 0.0, 1.0];
+        blend_row(&mut fg, &bg, BlendMode::SoftLight);
+        assert!((fg[0] - 0.736).abs() < 1e-5, "s<=0.5 case: {}", fg[0]);
+
+        // s=0.8, d=0.5: s > 0.5, d > 0.25 → g = sqrt(d), result = d + (2s-1)(g-d)
+        // g = sqrt(0.5) ≈ 0.7071, result = 0.5 + 0.6*(0.7071-0.5) = 0.6243
+        let mut fg2 = [0.8, 0.0, 0.0, 1.0];
+        let bg2 = [0.5, 0.0, 0.0, 1.0];
+        blend_row(&mut fg2, &bg2, BlendMode::SoftLight);
+        let expected = 0.5 + 0.6 * (0.5f32.sqrt() - 0.5);
+        assert!((fg2[0] - expected).abs() < 1e-5, "s>0.5,d>0.25 case: {} vs {}", fg2[0], expected);
+
+        // s=0.8, d=0.1: s > 0.5, d <= 0.25 → g = ((16d-12)*d+4)*d
+        // g = ((1.6-12)*0.1+4)*0.1 = (-10.4*0.1+4)*0.1 = 2.96*0.1 = 0.296
+        // result = 0.1 + 0.6*(0.296-0.1) = 0.2176
+        let mut fg3 = [0.8, 0.0, 0.0, 1.0];
+        let bg3 = [0.1, 0.0, 0.0, 1.0];
+        blend_row(&mut fg3, &bg3, BlendMode::SoftLight);
+        let g = ((16.0 * 0.1 - 12.0) * 0.1 + 4.0) * 0.1;
+        let expected3 = 0.1 + 0.6 * (g - 0.1);
+        assert!((fg3[0] - expected3).abs() < 1e-5, "s>0.5,d<=0.25 case: {} vs {}", fg3[0], expected3);
+    }
+
+    #[test]
     fn difference_mode() {
         // Both opaque → difference = |s - d|
         let mut fg = [0.5, 0.3, 0.8, 1.0];
