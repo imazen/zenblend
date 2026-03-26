@@ -386,7 +386,7 @@ impl RoundedRectMask {
                 if dist2 >= r_outer2 {
                     dst[x] = 0.0;
                 } else if dist2 > r_inner2 {
-                    let dist = libm::sqrtf(dist2);
+                    let dist = f32::sqrt(dist2);
                     let coverage = r_outer - dist;
                     dst[x] = coverage.clamp(0.0, 1.0);
                 }
@@ -445,7 +445,7 @@ impl MaskSource for RoundedRectMask {
 
             // X range where the outer circle intersects this row
             let x_extent_outer = if r_outer2 > dy2 {
-                libm::sqrtf(r_outer2 - dy2)
+                f32::sqrt(r_outer2 - dy2)
             } else {
                 0.0
             };
@@ -455,12 +455,12 @@ impl MaskSource for RoundedRectMask {
                 0 | 3 => {
                     // Left corners: affect pixels 0..cx+x_extent
                     let start = 0usize;
-                    let end = (libm::ceilf(cx + x_extent_outer) as usize).min(self.width as usize);
+                    let end = (f32::ceil(cx + x_extent_outer) as usize).min(self.width as usize);
                     (start, end)
                 }
                 1 | 2 => {
                     // Right corners: affect pixels cx-x_extent..width
-                    let start = (libm::floorf(cx - x_extent_outer).max(0.0)) as usize;
+                    let start = (f32::floor(cx - x_extent_outer).max(0.0)) as usize;
                     let end = self.width as usize;
                     (start, end)
                 }
@@ -492,7 +492,7 @@ impl MaskSource for RoundedRectMask {
                     any_partial = true;
                 } else if dist2 > r_inner2 {
                     // In the AA zone — smooth ramp
-                    let dist = libm::sqrtf(dist2);
+                    let dist = f32::sqrt(dist2);
                     let coverage = r_outer - dist; // 1.0 at inner edge, 0.0 at outer edge
                     dst[x] = coverage.clamp(0.0, 1.0);
                     any_partial = true;
@@ -549,7 +549,7 @@ impl MaskSource for RoundedRectMask {
             let r_outer2 = r_outer * r_outer;
             let dy2 = dy * dy;
             let x_extent = if r_outer2 > dy2 {
-                libm::sqrtf(r_outer2 - dy2)
+                f32::sqrt(r_outer2 - dy2)
             } else {
                 0.0
             };
@@ -562,7 +562,7 @@ impl MaskSource for RoundedRectMask {
                     // x = ceil(cx - 0.5) - 1, so exclusive end = ceil(cx - 0.5).
                     // Use x_extent to also skip rows where the arc doesn't reach.
                     if x_extent > 0.0 {
-                        let end = (libm::ceilf(cx - 0.5).max(0.0) as u32).min(w);
+                        let end = (f32::ceil(cx - 0.5).max(0.0) as u32).min(w);
                         left_end = left_end.max(end);
                     }
                 }
@@ -571,7 +571,7 @@ impl MaskSource for RoundedRectMask {
                     // such pixel has x + 0.5 > cx, so x >= ceil(cx - 0.5).
                     // Pixel index: floor(cx + 0.5) = the first pixel with center > cx.
                     if x_extent > 0.0 {
-                        let start = (libm::floorf(cx + 0.5).max(0.0)) as u32;
+                        let start = (f32::floor(cx + 0.5).max(0.0)) as u32;
                         right_start = right_start.min(start);
                     }
                 }
@@ -673,7 +673,7 @@ impl LinearGradientMask {
     pub fn new(width: u32, _height: u32, start: (f32, f32), end: (f32, f32)) -> Self {
         let dx = end.0 - start.0;
         let dy = end.1 - start.1;
-        let len = libm::sqrtf(dx * dx + dy * dy);
+        let len = f32::sqrt(dx * dx + dy * dy);
         let (dx, dy, inv_len) = if len > 0.0 {
             (dx / len, dy / len, 1.0 / len)
         } else {
@@ -830,7 +830,7 @@ impl MaskSource for RadialGradientMask {
         for (x, d) in dst.iter_mut().enumerate() {
             let xf = x as f32 + 0.5;
             let dx = xf - self.cx;
-            let dist = libm::sqrtf(dx * dx + dy2);
+            let dist = f32::sqrt(dx * dx + dy2);
 
             let v = if dist <= self.inner_r {
                 1.0
