@@ -12,12 +12,10 @@ test-nostd:
 feature-check:
     cargo check
     cargo check --no-default-features
-    cargo check --features avx512
 
 # Clippy
 clippy:
     cargo clippy --all-targets -- -D warnings
-    cargo clippy --all-targets --features avx512 -- -D warnings
 
 # Format
 fmt:
