@@ -114,8 +114,7 @@ Other blend modes use scalar implementations. Mask span alignment is SIMD-aware 
 
 | | |
 |:--|:--|
-| Image codecs | [zenjpeg] · [zenpng] · [zenwebp] · [zengif] · [zenavif] · [zenjxl] · [zentiff] · [zenbitmaps] · [heic] · [zenraw] · [zenpdf] · [ultrahdr] |
-| Codec engines | [jxl-encoder] · [zenjxl-decoder] · [rav1d-safe] · [zenrav1e] · [mozjpeg-rs] · [zenavif-parse] · [zenavif-serialize] · [webpx] |
+| State of the art codecs | [zenjpeg] ([mozjpeg-rs]) · [zenpng] · [zenwebp] · [zengif] · [zenavif] ([rav1d-safe] · [zenrav1e] · [zenavif-parse] · [zenavif-serialize]) · [zenjxl] ([jxl-encoder] · [zenjxl-decoder]) · [zentiff] · [zenbitmaps] · [heic] · [zenraw] · [zenpdf] · [ultrahdr] · [webpx] |
 | Compression | [zenflate] · [zenzop] |
 | Processing | [zenresize] · [zenfilters] · [zenquant] · **zenblend** |
 | Metrics | [zensim] · [fast-ssim2] · [butteraugli] · [resamplescope-rs] · [codec-eval] · [codec-corpus] |
@@ -139,7 +138,7 @@ I've maintained and developed open-source image server software -- and the 40+
 library ecosystem it depends on -- full-time since 2011. Fifteen years of
 continual maintenance, backwards compatibility, support, and the (very rare)
 security patch. That kind of stability requires sustainable funding, and
-dual-licensing is how we make it work without venture capital or rug-pulls.
+dual-licensing is how I make it work without venture capital or rug-pulls.
 Support sustainable and secure software; swap patch tuesday for patch leap-year.
 
 [Our open-source products](https://www.imazen.io/open-source)
