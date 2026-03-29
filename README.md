@@ -110,6 +110,23 @@ Other blend modes use scalar implementations. Mask span alignment is SIMD-aware 
 
 - `default = ["std"]`
 
+## Ecosystem
+
+#### Image tech I maintain
+
+**Image codecs** — [zenjpeg] · [zenpng] · [zenwebp] · [zengif] · [zenavif] · [zenjxl] · [zentiff] · [zenbitmaps] · [heic] · [zenraw] · [zenpdf] · [ultrahdr]
+**Codec engines** — [jxl-encoder] · [zenjxl-decoder] · [rav1d-safe] · [zenrav1e] · [mozjpeg-rs] · [zenavif-parse] · [zenavif-serialize] · [webpx] (C)
+**Compression** — [zenflate] · [zenzop]
+**Processing** — [zenresize] · [zenfilters] · [zenquant] · **zenblend**
+**Quality metrics** — [zensim] · [fast-ssim2] · [butteraugli]
+**Pixel types & color** — [zenpixels] · [zenpixels-convert] · [linear-srgb] · [garb]
+**Pipeline** — [zenpipe] · [zencodec] · [zencodecs] · [zenlayout] · [zennode]
+**Imageflow** — [Server][imageflow] (Rust+C#) · [.NET][imageflow-dotnet] · [node][imageflow-node] (TS) · [go][imageflow-go] (Go) · [ImageResizer] (C#)
+
+#### General Rust awesomeness
+
+[archmage] · [magetypes] · [enough] · [whereat] · [zenbench] · [cargo-copter]
+
 ## License
 
 Dual-licensed: [AGPL-3.0](LICENSE-AGPL3) or [commercial](LICENSE-COMMERCIAL).
@@ -134,3 +151,52 @@ Support sustainable and secure software; swap patch tuesday for patch leap-year.
 - **AGPL v3** -- Free and open. Share your source if you distribute.
 
 See [LICENSE-COMMERCIAL](LICENSE-COMMERCIAL) for details.
+
+[zenjpeg]: https://github.com/imazen/zenjpeg
+[zenpng]: https://github.com/imazen/zenpng
+[zenwebp]: https://github.com/imazen/zenwebp
+[zengif]: https://github.com/imazen/zengif
+[zenavif]: https://github.com/imazen/zenavif
+[zenjxl]: https://github.com/imazen/zenjxl
+[zentiff]: https://github.com/imazen/zentiff
+[zenbitmaps]: https://github.com/imazen/zenbitmaps
+[heic]: https://github.com/imazen/heic-decoder-rs
+[zenraw]: https://github.com/imazen/zenraw
+[zenpdf]: https://github.com/imazen/zenpdf
+[ultrahdr]: https://github.com/imazen/ultrahdr
+[jxl-encoder]: https://github.com/imazen/jxl-encoder
+[zenjxl-decoder]: https://github.com/imazen/zenjxl-decoder
+[rav1d-safe]: https://github.com/imazen/rav1d-safe
+[zenrav1e]: https://github.com/imazen/zenrav1e
+[mozjpeg-rs]: https://github.com/imazen/mozjpeg-rs
+[zenavif-parse]: https://github.com/imazen/zenavif-parse
+[zenavif-serialize]: https://github.com/imazen/zenavif-serialize
+[webpx]: https://github.com/imazen/webpx
+[zenflate]: https://github.com/imazen/zenflate
+[zenzop]: https://github.com/imazen/zenzop
+[zenresize]: https://github.com/imazen/zenresize
+[zenfilters]: https://github.com/imazen/zenfilters
+[zenquant]: https://github.com/imazen/zenquant
+[zensim]: https://github.com/imazen/zensim
+[fast-ssim2]: https://github.com/imazen/fast-ssim2
+[butteraugli]: https://github.com/imazen/butteraugli
+[zenpixels]: https://github.com/imazen/zenpixels
+[zenpixels-convert]: https://github.com/imazen/zenpixels
+[linear-srgb]: https://github.com/imazen/linear-srgb
+[garb]: https://github.com/imazen/garb
+[zenpipe]: https://github.com/imazen/zenpipe
+[zencodec]: https://github.com/imazen/zencodec
+[zencodecs]: https://github.com/imazen/zencodecs
+[zenlayout]: https://github.com/imazen/zenlayout
+[zennode]: https://github.com/imazen/zennode
+[imageflow]: https://github.com/imazen/imageflow
+[imageflow-dotnet]: https://github.com/imazen/imageflow-dotnet
+[imageflow-node]: https://github.com/imazen/imageflow-node
+[imageflow-go]: https://github.com/imazen/imageflow-go
+[ImageResizer]: https://github.com/imazen/resizer
+[archmage]: https://github.com/imazen/archmage
+[magetypes]: https://github.com/imazen/archmage
+[enough]: https://github.com/imazen/enough
+[whereat]: https://github.com/lilith/whereat
+[zenbench]: https://github.com/imazen/zenbench
+[cargo-copter]: https://github.com/imazen/cargo-copter
