@@ -112,21 +112,19 @@ Other blend modes use scalar implementations. Mask span alignment is SIMD-aware 
 
 ## Image tech I maintain
 
-**Image codecs** — [zenjpeg] · [zenpng] · [zenwebp] · [zengif] · [zenavif] · [zenjxl] · [zentiff] · [zenbitmaps] · [heic] · [zenraw] · [zenpdf] · [ultrahdr]
+| | |
+|---|---|
+| Image codecs | [zenjpeg] · [zenpng] · [zenwebp] · [zengif] · [zenavif] · [zenjxl] · [zentiff] · [zenbitmaps] · [heic] · [zenraw] · [zenpdf] · [ultrahdr] |
+| Codec engines | [jxl-encoder] · [zenjxl-decoder] · [rav1d-safe] · [zenrav1e] · [mozjpeg-rs] · [zenavif-parse] · [zenavif-serialize] · [webpx] |
+| Compression | [zenflate] · [zenzop] |
+| Processing | [zenresize] · [zenfilters] · [zenquant] · **zenblend** |
+| Quality metrics | [zensim] · [fast-ssim2] · [butteraugli] · [resamplescope-rs] · [codec-eval] · [codec-corpus] |
+| Pixel types & color | [zenpixels] · [zenpixels-convert] · [linear-srgb] · [garb] |
+| Pipeline | [zenpipe] · [zencodec] · [zencodecs] · [zenlayout] · [zennode] |
+| Imageflow Server | [imageflow] (Rust+C#) · [.NET][imageflow-dotnet] · [node][imageflow-node] (TS) · [go][imageflow-go] — 9M+ NuGet downloads |
+| ImageResizer | [ImageResizer] (C#) — 24M+ NuGet downloads |
 
-**Codec engines** — [jxl-encoder] · [zenjxl-decoder] · [rav1d-safe] · [zenrav1e] · [mozjpeg-rs] · [zenavif-parse] · [zenavif-serialize] · [webpx] (C)
-
-**Compression** — [zenflate] · [zenzop]
-
-**Processing** — [zenresize] · [zenfilters] · [zenquant] · **zenblend**
-
-**Quality metrics** — [zensim] · [fast-ssim2] · [butteraugli]
-
-**Pixel types & color** — [zenpixels] · [zenpixels-convert] · [linear-srgb] · [garb]
-
-**Pipeline** — [zenpipe] · [zencodec] · [zencodecs] · [zenlayout] · [zennode]
-
-**Imageflow** — [Server][imageflow] (Rust+C#) · [.NET][imageflow-dotnet] · [node][imageflow-node] (TS) · [go][imageflow-go] (Go) · [ImageResizer] (C#)
+[And other projects](https://www.imazen.io/open-source) · [imazen on GitHub](https://github.com/imazen) · [lib.rs/~lilith](https://lib.rs/~lilith) · [NuGet](https://www.nuget.org/profiles/imazen)
 
 ### General Rust awesomeness
 
@@ -205,3 +203,6 @@ See [LICENSE-COMMERCIAL](LICENSE-COMMERCIAL) for details.
 [whereat]: https://github.com/lilith/whereat
 [zenbench]: https://github.com/imazen/zenbench
 [cargo-copter]: https://github.com/imazen/cargo-copter
+[resamplescope-rs]: https://github.com/imazen/resamplescope-rs
+[codec-eval]: https://github.com/imazen/codec-eval
+[codec-corpus]: https://github.com/imazen/codec-corpus
