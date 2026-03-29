@@ -113,22 +113,23 @@ Other blend modes use scalar implementations. Mask span alignment is SIMD-aware 
 ## Image tech I maintain
 
 | | |
-|---|---|
+|:--|:--|
 | Image codecs | [zenjpeg] · [zenpng] · [zenwebp] · [zengif] · [zenavif] · [zenjxl] · [zentiff] · [zenbitmaps] · [heic] · [zenraw] · [zenpdf] · [ultrahdr] |
 | Codec engines | [jxl-encoder] · [zenjxl-decoder] · [rav1d-safe] · [zenrav1e] · [mozjpeg-rs] · [zenavif-parse] · [zenavif-serialize] · [webpx] |
 | Compression | [zenflate] · [zenzop] |
 | Processing | [zenresize] · [zenfilters] · [zenquant] · **zenblend** |
-| Quality metrics | [zensim] · [fast-ssim2] · [butteraugli] · [resamplescope-rs] · [codec-eval] · [codec-corpus] |
+| Metrics | [zensim] · [fast-ssim2] · [butteraugli] · [resamplescope-rs] · [codec-eval] · [codec-corpus] |
 | Pixel types & color | [zenpixels] · [zenpixels-convert] · [linear-srgb] · [garb] |
 | Pipeline | [zenpipe] · [zencodec] · [zencodecs] · [zenlayout] · [zennode] |
-| Imageflow Server | [imageflow] (Rust+C#) · [.NET][imageflow-dotnet] · [node][imageflow-node] (TS) · [go][imageflow-go] — 9M+ NuGet downloads |
-| ImageResizer | [ImageResizer] (C#) — 24M+ NuGet downloads |
-
-[And other projects](https://www.imazen.io/open-source) · [imazen on GitHub](https://github.com/imazen) · [lib.rs/~lilith](https://lib.rs/~lilith) · [NuGet](https://www.nuget.org/profiles/imazen)
+| ImageResizer | [ImageResizer] (C#) — 24M+ NuGet downloads across all packages |
+| [Imageflow][] | Image optimization engine (Rust) — [.NET][imageflow-dotnet] · [node][imageflow-node] · [go][imageflow-go] — 9M+ NuGet downloads across all packages |
+| [Imageflow Server][] | [The fast, safe image server](https://www.imazen.io/) (Rust+C#) — 552K+ NuGet downloads, deployed by Fortune 500s and major brands |
 
 ### General Rust awesomeness
 
 [archmage] · [magetypes] · [enough] · [whereat] · [zenbench] · [cargo-copter]
+
+[And other projects](https://www.imazen.io/open-source) · [GitHub @imazen](https://github.com/imazen) · [GitHub @lilith](https://github.com/lilith) · [lib.rs/~lilith](https://lib.rs/~lilith) · [NuGet](https://www.nuget.org/profiles/imazen)
 
 ## License
 
@@ -192,7 +193,8 @@ See [LICENSE-COMMERCIAL](LICENSE-COMMERCIAL) for details.
 [zencodecs]: https://github.com/imazen/zencodecs
 [zenlayout]: https://github.com/imazen/zenlayout
 [zennode]: https://github.com/imazen/zennode
-[imageflow]: https://github.com/imazen/imageflow
+[Imageflow]: https://github.com/imazen/imageflow
+[Imageflow Server]: https://github.com/imazen/imageflow-server
 [imageflow-dotnet]: https://github.com/imazen/imageflow-dotnet
 [imageflow-node]: https://github.com/imazen/imageflow-node
 [imageflow-go]: https://github.com/imazen/imageflow-go
