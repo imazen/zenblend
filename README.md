@@ -113,15 +113,22 @@ Other blend modes use scalar implementations. Mask span alignment is SIMD-aware 
 ## Image tech I maintain
 
 **Image codecs** — [zenjpeg] · [zenpng] · [zenwebp] · [zengif] · [zenavif] · [zenjxl] · [zentiff] · [zenbitmaps] · [heic] · [zenraw] · [zenpdf] · [ultrahdr]
+
 **Codec engines** — [jxl-encoder] · [zenjxl-decoder] · [rav1d-safe] · [zenrav1e] · [mozjpeg-rs] · [zenavif-parse] · [zenavif-serialize] · [webpx] (C)
+
 **Compression** — [zenflate] · [zenzop]
+
 **Processing** — [zenresize] · [zenfilters] · [zenquant] · **zenblend**
+
 **Quality metrics** — [zensim] · [fast-ssim2] · [butteraugli]
+
 **Pixel types & color** — [zenpixels] · [zenpixels-convert] · [linear-srgb] · [garb]
+
 **Pipeline** — [zenpipe] · [zencodec] · [zencodecs] · [zenlayout] · [zennode]
+
 **Imageflow** — [Server][imageflow] (Rust+C#) · [.NET][imageflow-dotnet] · [node][imageflow-node] (TS) · [go][imageflow-go] (Go) · [ImageResizer] (C#)
 
-##### General Rust awesomeness
+### General Rust awesomeness
 
 [archmage] · [magetypes] · [enough] · [whereat] · [zenbench] · [cargo-copter]
 
