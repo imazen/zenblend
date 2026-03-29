@@ -205,12 +205,7 @@ pub fn mask_row_constant(fg: &mut [f32], alpha: f32) {
 ///
 /// Panics if `fg.len() != mask_buf.len() * 4` or `fg.len()` is not divisible by 4.
 #[inline]
-pub fn apply_mask_spans(
-    fg: &mut [f32],
-    mask_buf: &mut [f32],
-    mask: &dyn mask::MaskSource,
-    y: u32,
-) {
+pub fn apply_mask_spans(fg: &mut [f32], mask_buf: &mut [f32], mask: &dyn mask::MaskSource, y: u32) {
     assert_eq!(
         fg.len(),
         mask_buf.len() * 4,
@@ -233,10 +228,7 @@ pub fn apply_mask_spans(
                 fg[ch_start..ch_end].fill(0.0);
             }
             mask::SpanKind::Partial => {
-                simd::mask_row_apply(
-                    &mut fg[ch_start..ch_end],
-                    &mask_buf[px_start..px_end],
-                );
+                simd::mask_row_apply(&mut fg[ch_start..ch_end], &mask_buf[px_start..px_end]);
             }
         }
     }
@@ -281,11 +273,7 @@ pub fn mask_row_rgb(fg: &mut [f32], mask: &[f32]) {
 pub fn lerp_row(a: &[f32], b: &[f32], t: &[f32], out: &mut [f32]) {
     assert_eq!(a.len(), b.len(), "a and b must have equal length");
     assert_eq!(a.len(), out.len(), "a and out must have equal length");
-    assert_eq!(
-        a.len(),
-        t.len() * 4,
-        "a must have 4× as many elements as t"
-    );
+    assert_eq!(a.len(), t.len() * 4, "a must have 4× as many elements as t");
     assert_eq!(a.len() % 4, 0, "length must be divisible by 4");
     simd::lerp_row_apply(a, b, t, out);
 }
@@ -536,7 +524,12 @@ mod tests {
         let bg2 = [0.5, 0.0, 0.0, 1.0];
         blend_row(&mut fg2, &bg2, BlendMode::SoftLight);
         let expected = 0.5 + 0.6 * (0.5f32.sqrt() - 0.5);
-        assert!((fg2[0] - expected).abs() < 1e-5, "s>0.5,d>0.25 case: {} vs {}", fg2[0], expected);
+        assert!(
+            (fg2[0] - expected).abs() < 1e-5,
+            "s>0.5,d>0.25 case: {} vs {}",
+            fg2[0],
+            expected
+        );
 
         // s=0.8, d=0.1: s > 0.5, d <= 0.25 → g = ((16d-12)*d+4)*d
         // g = ((1.6-12)*0.1+4)*0.1 = (-10.4*0.1+4)*0.1 = 2.96*0.1 = 0.296
@@ -546,7 +539,12 @@ mod tests {
         blend_row(&mut fg3, &bg3, BlendMode::SoftLight);
         let g = ((16.0 * 0.1 - 12.0) * 0.1 + 4.0) * 0.1;
         let expected3 = 0.1 + 0.6 * (g - 0.1);
-        assert!((fg3[0] - expected3).abs() < 1e-5, "s>0.5,d<=0.25 case: {} vs {}", fg3[0], expected3);
+        assert!(
+            (fg3[0] - expected3).abs() < 1e-5,
+            "s>0.5,d<=0.25 case: {} vs {}",
+            fg3[0],
+            expected3
+        );
     }
 
     #[test]
@@ -644,7 +642,10 @@ mod tests {
         let mut fg2 = b;
         blend_row(&mut fg2, &a, BlendMode::Plus);
         for i in 0..4 {
-            assert!((fg1[i] - fg2[i]).abs() < 1e-6, "Plus not commutative at {i}");
+            assert!(
+                (fg1[i] - fg2[i]).abs() < 1e-6,
+                "Plus not commutative at {i}"
+            );
         }
     }
 
@@ -656,7 +657,10 @@ mod tests {
         let bg = [1.0, 1.0, 1.0, 1.0];
         blend_row(&mut fg, &bg, BlendMode::Multiply);
         for i in 0..4 {
-            assert!((fg[i] - original[i]).abs() < 1e-6, "Multiply(white) not identity at {i}");
+            assert!(
+                (fg[i] - original[i]).abs() < 1e-6,
+                "Multiply(white) not identity at {i}"
+            );
         }
     }
 
@@ -689,8 +693,16 @@ mod tests {
         let mut fg = [0.9, 0.1, 0.5, 1.0];
         let bg = [0.8, 0.2, 0.5, 1.0];
         blend_row(&mut fg, &bg, BlendMode::HardMix);
-        assert!(fg[0] == 0.0 || fg[0] == 1.0, "HardMix must be 0 or 1, got {}", fg[0]);
-        assert!(fg[1] == 0.0 || fg[1] == 1.0, "HardMix must be 0 or 1, got {}", fg[1]);
+        assert!(
+            fg[0] == 0.0 || fg[0] == 1.0,
+            "HardMix must be 0 or 1, got {}",
+            fg[0]
+        );
+        assert!(
+            fg[1] == 0.0 || fg[1] == 1.0,
+            "HardMix must be 0 or 1, got {}",
+            fg[1]
+        );
         assert!((fg[3] - 1.0).abs() < 1e-6);
     }
 
@@ -778,11 +790,7 @@ mod tests {
 
     #[test]
     fn mask_row_rgb_multi_pixel() {
-        let mut fg = [
-            0.4, 0.6, 0.8, 1.0,
-            0.2, 0.4, 0.6, 0.5,
-            0.1, 0.3, 0.5, 0.8,
-        ];
+        let mut fg = [0.4, 0.6, 0.8, 1.0, 0.2, 0.4, 0.6, 0.5, 0.1, 0.3, 0.5, 0.8];
         let mask = [0.5, 1.0, 0.0];
         mask_row_rgb(&mut fg, &mask);
         // Pixel 0: RGB halved, alpha preserved
@@ -837,8 +845,8 @@ mod tests {
 
     #[test]
     fn lerp_row_multi_pixel() {
-        let a = [0.0, 0.0, 0.0, 0.0,  1.0, 1.0, 1.0, 1.0];
-        let b = [1.0, 1.0, 1.0, 1.0,  0.0, 0.0, 0.0, 0.0];
+        let a = [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+        let b = [1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0];
         let t = [0.25, 0.75];
         let mut out = [0.0; 8];
         lerp_row(&a, &b, &t, &mut out);
