@@ -851,12 +851,12 @@ mod tests {
         let mut out = [0.0; 8];
         lerp_row(&a, &b, &t, &mut out);
         // Pixel 0: 0 + (1-0)*0.25 = 0.25
-        for c in 0..4 {
-            assert!((out[c] - 0.25).abs() < 1e-6);
+        for val in &out[..4] {
+            assert!((val - 0.25).abs() < 1e-6);
         }
         // Pixel 1: 1 + (0-1)*0.75 = 0.25
-        for c in 4..8 {
-            assert!((out[c] - 0.25).abs() < 1e-6);
+        for val in &out[4..8] {
+            assert!((val - 0.25).abs() < 1e-6);
         }
     }
 }

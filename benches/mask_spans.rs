@@ -44,7 +44,7 @@ fn bench_mask(mask: &dyn MaskSource, width: u32, height: u32, label: &str) {
     let mut mask_buf = vec![0.0f32; width as usize];
 
     // Rows: one near top corner, one center, one near bottom corner
-    let rows = [5.min(height - 1), height / 2, (height - 6).max(0)];
+    let rows = [5.min(height - 1), height / 2, height - 6];
 
     // --- Naive: fill_mask_row + mask_row on full row ---
     let start = Instant::now();
