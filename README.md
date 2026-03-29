@@ -1,73 +1,92 @@
-# zenblend
+# zenblend ![CI](https://img.shields.io/github/actions/workflow/status/imazen/zenblend/ci.yml?style=for-the-badge) ![MSRV](https://img.shields.io/badge/MSRV-1.93-blue?style=for-the-badge) ![License](https://img.shields.io/badge/license-AGPL--3.0--only%20OR%20Commercial-blue?style=for-the-badge)
 
-Porter-Duff and artistic blend modes on premultiplied linear f32 RGBA rows. SIMD-accelerated.
+zenblend is a row-level pixel blending library for premultiplied linear f32 RGBA compositing pipelines.
 
-## What it does
-
-Row-level pixel blending for image compositing pipelines. All operations work on
-**premultiplied linear f32 RGBA** data — 4 interleaved floats per pixel, alpha
-pre-applied, in linear light.
-
-Designed for integration with [zenpipe](https://github.com/imazen/zenpipe) and
-[zenimage](https://github.com/imazen/zenimage). Not a standalone compositing
-engine — it's the inner loop.
+All operations work on `&mut [f32]` slices -- 4 interleaved floats per pixel, alpha pre-applied, in linear light. Designed as the inner loop for [zenpipe](https://github.com/imazen/zenpipe) strip pipelines, not a standalone compositing engine.
 
 ## Blend modes
 
 **Porter-Duff (12):** Clear, Src, Dst, SrcOver, DstOver, SrcIn, DstIn, SrcOut,
 DstOut, SrcAtop, DstAtop, Xor
 
-**Artistic (21):** Multiply, Screen, Overlay, Darken, Lighten, HardLight, SoftLight,
+**Artistic (20):** Multiply, Screen, Overlay, Darken, Lighten, HardLight, SoftLight,
 ColorDodge, ColorBurn, Difference, Exclusion, LinearBurn, LinearDodge, VividLight,
 LinearLight, PinLight, HardMix, Divide, Subtract, Plus
 
-33 modes total. Artistic modes unpremultiply per-pixel, apply the blend function,
+32 modes total. Artistic modes unpremultiply per-pixel, apply the blend function,
 then re-premultiply. Plus operates directly on premultiplied data.
 
-## Usage
+## Getting started
+
+### Blending two rows
 
 ```rust
-use zenblend::{blend_row, BlendMode};
+use zenblend::{BlendMode, blend_row, blend_row_solid, blend_row_solid_opaque};
 
-// fg and bg are &mut [f32] / &[f32], length divisible by 4
-// fg is modified in place
-blend_row(fg, bg, BlendMode::SrcOver);
+// fg and bg are premultiplied linear f32, 4ch RGBA, equal length, divisible by 4.
+// fg is modified in place to contain the blended result.
+let mut fg = vec![0.5, 0.0, 0.0, 0.5,  0.0, 0.3, 0.0, 1.0];
+let bg =     vec![0.0, 0.3, 0.0, 1.0,  0.0, 0.0, 0.5, 0.5];
+blend_row(&mut fg, &bg, BlendMode::SrcOver);
 
-// Blend against a solid color (no buffer needed for background)
-blend_row_solid(fg, &[0.2, 0.0, 0.0, 0.5], BlendMode::Multiply);
+// Blend against a solid color -- no row buffer needed for background.
+let mut row = vec![0.5, 0.0, 0.0, 0.5,  0.0, 0.3, 0.0, 1.0];
+blend_row_solid(&mut row, &[0.2, 0.0, 0.0, 0.5], BlendMode::Multiply);
+
+// Optimized path when the background is opaque (alpha = 1.0).
+let mut row2 = vec![0.5, 0.0, 0.0, 0.5,  0.0, 0.3, 0.0, 1.0];
+blend_row_solid_opaque(&mut row2, &[0.2, 0.1, 0.05, 1.0], BlendMode::SrcOver);
 ```
 
 ### Masking
 
 ```rust
-use zenblend::mask::{mask_row, mask_row_constant, RoundedRectMask, MaskSource};
+use zenblend::mask::{RoundedRectMask, MaskSource};
+use zenblend::{mask_row, mask_row_constant, mask_row_rgb, apply_mask_spans};
 
-// Per-pixel mask (4-channel, multiplies each channel)
-mask_row(pixels, mask_values);
+let mut pixels = vec![0.5, 0.0, 0.0, 0.5,  0.0, 0.3, 0.0, 1.0];
 
-// Uniform opacity
-mask_row_constant(pixels, 0.7);
+// Per-pixel mask: one f32 per pixel, broadcast to all 4 channels.
+let mask_values = vec![0.8, 1.0];
+mask_row(&mut pixels, &mask_values);
 
-// Span-optimized masking — skips fully opaque/transparent regions
+// Uniform opacity -- no mask buffer needed.
+mask_row_constant(&mut pixels, 0.7);
+
+// RGB-only mask: multiplies R, G, B but leaves alpha untouched.
+// Use case: gain map application, vignette without opacity change.
+let rgb_mask = vec![0.9, 1.0];
+mask_row_rgb(&mut pixels, &rgb_mask);
+
+// Span-optimized masking -- skips fully opaque/transparent regions.
+let width = 64;
+let height = 64;
 let mask = RoundedRectMask::new(width, height, [10.0, 10.0, 10.0, 10.0]);
-apply_mask_spans(pixels, &mut mask_buf, &mask, y);
+let mut row = vec![0.5f32; (width as usize) * 4];
+let mut mask_buf = vec![0.0f32; width as usize];
+apply_mask_spans(&mut row, &mut mask_buf, &mask, 0);
 ```
 
 Built-in masks: `RoundedRectMask`, `LinearGradientMask`, `RadialGradientMask`.
-Implement `MaskSource` for custom masks.
+Implement the `MaskSource` trait for custom masks.
 
 ### Interpolation
 
 ```rust
 use zenblend::lerp_row;
 
-// Per-pixel blend factor t ∈ [0, 1]
-lerp_row(row_a, row_b, t_values, output);
+// Per-pixel blend factor t in [0, 1]. One f32 per pixel.
+// t=0 -> a, t=1 -> b.
+let a   = vec![1.0, 0.0, 0.0, 1.0,  0.0, 0.0, 0.0, 0.0];
+let b   = vec![0.0, 0.0, 1.0, 1.0,  0.0, 1.0, 0.0, 1.0];
+let t   = vec![0.5, 0.5];
+let mut out = vec![0.0f32; 8];
+lerp_row(&a, &b, &t, &mut out);
 ```
 
 ## SIMD acceleration
 
-SrcOver (the most common compositing operation) is SIMD-accelerated:
+SrcOver, masking (`mask_row`, `mask_row_rgb`), and `lerp_row` are SIMD-accelerated via runtime CPU dispatch through [archmage](https://crates.io/crates/archmage):
 
 | Platform | ISA | Pixels/iter |
 |----------|-----|-------------|
@@ -76,23 +95,27 @@ SrcOver (the most common compositing operation) is SIMD-accelerated:
 | WASM | simd128 | 1 |
 | Fallback | scalar | 1 |
 
-Other blend modes use scalar implementations. Masking span alignment
-is SIMD-aware (snaps partial spans to block boundaries).
+Other blend modes use scalar implementations. Mask span alignment is SIMD-aware (snaps partial spans to block boundaries).
 
-Runtime CPU dispatch via [archmage](https://crates.io/crates/archmage).
-`#![forbid(unsafe_code)]` — all SIMD through safe abstractions.
+`#![forbid(unsafe_code)]` -- all SIMD through safe abstractions.
+
+## Limitations
+
+- All data must be premultiplied linear f32 RGBA. There is no format conversion; bring your own linearization.
+- No non-separable blend modes (Hue, Saturation, Color, Luminosity).
+- Only SrcOver has a dedicated SIMD fast path for blending; the other 31 modes run scalar per-pixel loops.
+- Row-level API only. There is no tile, buffer, or image-level compositing -- that belongs in zenpipe.
 
 ## Features
 
 - `default = ["std"]`
-- `no_std + alloc` compatible (disable default features)
 
 ## License
 
 Dual-licensed: [AGPL-3.0](LICENSE-AGPL3) or [commercial](LICENSE-COMMERCIAL).
 
-I've maintained and developed open-source image server software — and the 40+
-library ecosystem it depends on — full-time since 2011. Fifteen years of
+I've maintained and developed open-source image server software -- and the 40+
+library ecosystem it depends on -- full-time since 2011. Fifteen years of
 continual maintenance, backwards compatibility, support, and the (very rare)
 security patch. That kind of stability requires sustainable funding, and
 dual-licensing is how we make it work without venture capital or rug-pulls.
@@ -102,12 +125,12 @@ Support sustainable and secure software; swap patch tuesday for patch leap-year.
 
 **Your options:**
 
-- **Startup license** — $1 if your company has under $1M revenue and fewer
-  than 5 employees. [Get a key →](https://www.imazen.io/pricing)
-- **Commercial subscription** — Governed by the Imazen Site-wide Subscription
+- **Startup license** -- $1 if your company has under $1M revenue and fewer
+  than 5 employees. [Get a key](https://www.imazen.io/pricing)
+- **Commercial subscription** -- Governed by the Imazen Site-wide Subscription
   License v1.1 or later. Apache 2.0-like terms, no source-sharing requirement.
   Sliding scale by company size.
-  [Pricing & 60-day free trial →](https://www.imazen.io/pricing)
-- **AGPL v3** — Free and open. Share your source if you distribute.
+  [Pricing & 60-day free trial](https://www.imazen.io/pricing)
+- **AGPL v3** -- Free and open. Share your source if you distribute.
 
 See [LICENSE-COMMERCIAL](LICENSE-COMMERCIAL) for details.
