@@ -129,7 +129,7 @@ Other blend modes use scalar implementations. Mask span alignment is SIMD-aware 
 
 [archmage] · [magetypes] · [enough] · [whereat] · [zenbench] · [cargo-copter]
 
-[And other projects](https://www.imazen.io/open-source) · [GitHub @imazen](https://github.com/imazen) · [GitHub @lilith](https://github.com/lilith) · [lib.rs/~lilith](https://lib.rs/~lilith) · [NuGet](https://www.nuget.org/profiles/imazen)
+[And other projects](https://www.imazen.io/open-source) · [GitHub @imazen](https://github.com/imazen) · [GitHub @lilith](https://github.com/lilith) · [lib.rs/~lilith](https://lib.rs/~lilith) · [NuGet](https://www.nuget.org/profiles/imazen) (over 30 million downloads / 87 packages)
 
 ## License
 
