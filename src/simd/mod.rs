@@ -1,10 +1,13 @@
 //! SIMD-accelerated blend kernels.
 //!
 //! Uses archmage incant! dispatch to select the best available implementation:
-//! - x86_64: AVX2+FMA (X64V3Token)
-//! - AArch64: NEON via wide (NeonToken)
-//! - WASM32: SIMD128 via wide (Wasm128Token)
-//! - Fallback: Scalar
+//! - x86_64: AVX2+FMA (X64V3Token) via magetypes f32x8
+//! - AArch64: NEON via magetypes f32x4 (NeonToken)
+//! - WASM32: SIMD128 via magetypes f32x4 (Wasm128Token)
+//! - Fallback: Scalar via magetypes f32x4 (ScalarToken)
+
+// Generic f32x4 kernels shared by all non-x86 backends (and scalar fallback)
+mod wide_kernels;
 
 mod scalar;
 #[allow(unused_imports)]
@@ -15,9 +18,6 @@ mod x86;
 #[cfg(target_arch = "x86_64")]
 #[allow(unused_imports)]
 use x86::*;
-
-#[cfg(any(target_arch = "aarch64", target_arch = "wasm32"))]
-mod wide_kernels;
 
 #[cfg(target_arch = "aarch64")]
 mod neon;
