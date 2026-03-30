@@ -9,7 +9,7 @@ use magetypes::simd::generic::f32x4;
 
 /// SrcOver row blend using magetypes f32x4 (1 pixel per iteration).
 #[inline]
-pub(super) fn blend_src_over_row_generic<T: F32x4Backend>(token: T, fg: &mut [f32], bg: &[f32]) {
+pub(super) fn blend_src_over_row<T: F32x4Backend>(token: T, fg: &mut [f32], bg: &[f32]) {
     let (fg_chunks, _) = f32x4::<T>::partition_slice_mut(token, fg);
     let (bg_chunks, _) = f32x4::<T>::partition_slice(token, bg);
 
@@ -24,11 +24,7 @@ pub(super) fn blend_src_over_row_generic<T: F32x4Backend>(token: T, fg: &mut [f3
 
 /// SrcOver solid pixel blend using magetypes f32x4.
 #[inline]
-pub(super) fn blend_src_over_solid_generic<T: F32x4Backend>(
-    token: T,
-    fg: &mut [f32],
-    pixel: &[f32; 4],
-) {
+pub(super) fn blend_src_over_solid<T: F32x4Backend>(token: T, fg: &mut [f32], pixel: &[f32; 4]) {
     let px = f32x4::load(token, pixel);
     let (fg_chunks, _) = f32x4::<T>::partition_slice_mut(token, fg);
 
@@ -42,7 +38,7 @@ pub(super) fn blend_src_over_solid_generic<T: F32x4Backend>(
 
 /// SrcOver solid opaque pixel blend using magetypes f32x4.
 #[inline]
-pub(super) fn blend_src_over_solid_opaque_generic<T: F32x4Backend>(
+pub(super) fn blend_src_over_solid_opaque<T: F32x4Backend>(
     token: T,
     fg: &mut [f32],
     pixel: &[f32; 4],
@@ -62,7 +58,7 @@ pub(super) fn blend_src_over_solid_opaque_generic<T: F32x4Backend>(
 
 /// Per-pixel mask multiply using magetypes f32x4.
 #[inline]
-pub(super) fn mask_row_apply_generic<T: F32x4Backend>(token: T, fg: &mut [f32], mask: &[f32]) {
+pub(super) fn mask_row_apply<T: F32x4Backend>(token: T, fg: &mut [f32], mask: &[f32]) {
     let (fg_chunks, _) = f32x4::<T>::partition_slice_mut(token, fg);
 
     for (fg_chunk, &m) in fg_chunks.iter_mut().zip(mask.iter()) {
@@ -75,7 +71,7 @@ pub(super) fn mask_row_apply_generic<T: F32x4Backend>(token: T, fg: &mut [f32], 
 
 /// Per-pixel mask multiply on RGB only, alpha untouched, magetypes f32x4.
 #[inline]
-pub(super) fn mask_row_rgb_apply_generic<T: F32x4Backend>(token: T, fg: &mut [f32], mask: &[f32]) {
+pub(super) fn mask_row_rgb_apply<T: F32x4Backend>(token: T, fg: &mut [f32], mask: &[f32]) {
     let (fg_chunks, _) = f32x4::<T>::partition_slice_mut(token, fg);
 
     for (fg_chunk, &m) in fg_chunks.iter_mut().zip(mask.iter()) {
@@ -88,7 +84,7 @@ pub(super) fn mask_row_rgb_apply_generic<T: F32x4Backend>(token: T, fg: &mut [f3
 
 /// Linearly interpolate between two RGBA rows, magetypes f32x4.
 #[inline]
-pub(super) fn lerp_row_apply_generic<T: F32x4Backend>(
+pub(super) fn lerp_row_apply<T: F32x4Backend>(
     token: T,
     a: &[f32],
     b: &[f32],
