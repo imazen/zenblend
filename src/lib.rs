@@ -193,7 +193,7 @@ pub fn mask_row_constant(fg: &mut [f32], alpha: f32) {
 
 /// Apply a mask to a premultiplied RGBA row using span hints.
 ///
-/// Uses [`MaskSource::mask_spans`] to identify opaque, transparent, and partial
+/// Uses [`mask::MaskSource::mask_spans`] to identify opaque, transparent, and partial
 /// regions. Opaque spans are skipped entirely. Transparent spans are zeroed.
 /// Only partial spans invoke per-pixel mask multiplication — typically a small
 /// fraction of the row (e.g., corner arcs for rounded rectangles).
