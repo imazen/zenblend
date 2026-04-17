@@ -555,26 +555,24 @@ impl MaskSource for RoundedRectMask {
             };
 
             match i {
-                0 | 3 => {
+                0 | 3
                     // Left corners: fill_mask_row checks in_corner_x as xf < cx,
                     // and scans 0..ceil(cx + x_extent). But only pixels with
                     // xf < cx are modified. The rightmost such pixel has
                     // x = ceil(cx - 0.5) - 1, so exclusive end = ceil(cx - 0.5).
                     // Use x_extent to also skip rows where the arc doesn't reach.
-                    if x_extent > 0.0 {
+                    if x_extent > 0.0 => {
                         let end = (f32::ceil(cx - 0.5).max(0.0) as u32).min(w);
                         left_end = left_end.max(end);
                     }
-                }
-                1 | 2 => {
+                1 | 2
                     // Right corners: in_corner_x checks xf > cx. The leftmost
                     // such pixel has x + 0.5 > cx, so x >= ceil(cx - 0.5).
                     // Pixel index: floor(cx + 0.5) = the first pixel with center > cx.
-                    if x_extent > 0.0 {
+                    if x_extent > 0.0 => {
                         let start = (f32::floor(cx + 0.5).max(0.0)) as u32;
                         right_start = right_start.min(start);
                     }
-                }
                 _ => {}
             }
         }

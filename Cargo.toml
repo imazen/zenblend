@@ -1,6 +1,6 @@
 [package]
 name = "zenblend"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
 rust-version = "1.93"
 license = "AGPL-3.0-only OR LicenseRef-Imazen-Commercial"
@@ -8,7 +8,7 @@ description = "Porter-Duff and artistic blend modes on premultiplied linear f32 
 repository = "https://github.com/imazen/zenblend"
 keywords = ["blend", "compositing", "porter-duff", "simd", "alpha"]
 categories = ["graphics", "multimedia::images"]
-exclude = ["CLAUDE.md", "CONTEXT-HANDOFF.md", "FEEDBACK.md", ".claude/", ".superwork/", ".zenbench/", "copter-report/", ".github/", "Cross.toml", "justfile", "Cargo.toml.original.txt", "fuzz/"]
+include = ["src/**/*.rs", "benches/**/*.rs", "tests/**/*.rs", "Cargo.toml", "LICENSE-AGPL3", "LICENSE-COMMERCIAL", "README.md", "CHANGELOG.md"]
 
 [features]
 default = ["std"]
