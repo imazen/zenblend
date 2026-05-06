@@ -201,6 +201,15 @@ pub fn mask_row_constant(fg: &mut [f32], alpha: f32) {
 /// `mask_buf` is a scratch buffer with one `f32` per pixel (`fg.len() / 4`).
 /// Only the partial-span portions are filled by the mask source.
 ///
+/// # Robustness against buggy `MaskSource` implementations
+///
+/// Spans returned by the trait impl are validated before use: they must be
+/// non-overlapping, ordered by `start`, fit inside `[0, width]`, and cover
+/// every pixel in the row. If validation fails (whether from a bug or a
+/// hostile impl), this function falls back to filling the entire row via
+/// [`mask::MaskSource::fill_mask_row`] and applying it as a single Partial
+/// span — no panic, no slice OOB, no skipped pixels.
+///
 /// # Panics
 ///
 /// Panics if `fg.len() != mask_buf.len() * 4` or `fg.len()` is not divisible by 4.
@@ -213,12 +222,39 @@ pub fn apply_mask_spans(fg: &mut [f32], mask_buf: &mut [f32], mask: &dyn mask::M
     );
     assert_eq!(fg.len() % 4, 0, "fg length must be divisible by 4");
 
+    let width = mask_buf.len() as u32;
     let mut spans = mask.mask_spans(mask_buf, y);
+
+    // Validate spans before alignment — alignment assumes a well-formed input.
+    // A buggy/hostile MaskSource impl could produce spans that overflow the
+    // row, overlap, or leave gaps; align_to + the per-span slice indexing
+    // below would panic on slice OOB. Fall back to a safe full-row Partial
+    // path instead of crashing the caller.
+    if !spans_cover_row(&spans, width) {
+        let fill = mask.fill_mask_row(mask_buf, y);
+        match fill {
+            mask::MaskFill::AllOpaque => return,
+            mask::MaskFill::AllTransparent => {
+                fg.fill(0.0);
+                return;
+            }
+            mask::MaskFill::Partial => {
+                simd::mask_row_apply(fg, mask_buf);
+                return;
+            }
+        }
+    }
+
     spans.align_to(mask::mask_pixel_align());
 
     for span in spans.iter() {
         let px_start = span.start as usize;
         let px_end = span.end as usize;
+        // Defensive clamp: align_to should preserve coverage, but guard
+        // against any future change that could produce out-of-range indices.
+        if px_end > mask_buf.len() || px_start > px_end {
+            continue;
+        }
         let ch_start = px_start * 4;
         let ch_end = px_end * 4;
 
@@ -232,6 +268,37 @@ pub fn apply_mask_spans(fg: &mut [f32], mask_buf: &mut [f32], mask: &dyn mask::M
             }
         }
     }
+}
+
+/// Validate that spans are well-formed for a row of the given width.
+///
+/// Requires: spans non-empty, ordered by `start`, non-overlapping, all within
+/// `[0, width]`, every pixel `0..width` covered exactly once. Empty rows
+/// (width == 0) are valid only with no spans.
+fn spans_cover_row(spans: &mask::MaskSpans, width: u32) -> bool {
+    if width == 0 {
+        return spans.is_empty();
+    }
+    if spans.is_empty() {
+        return false;
+    }
+    let mut prev_end = 0u32;
+    let mut first = true;
+    for span in spans.iter() {
+        if span.start > span.end || span.end > width {
+            return false;
+        }
+        if first {
+            if span.start != 0 {
+                return false;
+            }
+            first = false;
+        } else if span.start != prev_end {
+            return false;
+        }
+        prev_end = span.end;
+    }
+    prev_end == width
 }
 
 /// Multiply R, G, B by per-pixel mask; leave alpha untouched.
@@ -857,6 +924,201 @@ mod tests {
         // Pixel 1: 1 + (0-1)*0.75 = 0.25
         for val in &out[4..8] {
             assert!((val - 0.25).abs() < 1e-6);
+        }
+    }
+
+    // =========================================================================
+    // Hardening tests (M1, M2 — security-audit-2026-05-06)
+    // =========================================================================
+
+    /// Buggy `MaskSource` impls that return malformed spans must not panic via
+    /// slice OOB. `apply_mask_spans` validates spans and falls back to the
+    /// per-pixel `fill_mask_row` path when validation fails.
+    mod hostile_mask {
+        use crate::mask::{MaskFill, MaskSource, MaskSpan, MaskSpans, SpanKind};
+
+        /// Returns a span past the end of the row.
+        pub struct OutOfBoundsSpans;
+        impl MaskSource for OutOfBoundsSpans {
+            fn fill_mask_row(&self, dst: &mut [f32], _y: u32) -> MaskFill {
+                dst.fill(0.5);
+                MaskFill::Partial
+            }
+            fn mask_spans(&self, dst: &mut [f32], _y: u32) -> MaskSpans {
+                let w = dst.len() as u32;
+                let mut s = MaskSpans::new();
+                // start past width — would OOB on slice indexing
+                s.push(MaskSpan {
+                    start: 0,
+                    end: w + 100,
+                    kind: SpanKind::Partial,
+                });
+                s
+            }
+        }
+
+        /// Returns spans with a gap in coverage.
+        pub struct GappySpans;
+        impl MaskSource for GappySpans {
+            fn fill_mask_row(&self, dst: &mut [f32], _y: u32) -> MaskFill {
+                dst.fill(1.0);
+                MaskFill::AllOpaque
+            }
+            fn mask_spans(&self, dst: &mut [f32], _y: u32) -> MaskSpans {
+                let w = dst.len() as u32;
+                let mut s = MaskSpans::new();
+                // Coverage stops at half — pixels [w/2..w) silently never processed
+                s.push(MaskSpan {
+                    start: 0,
+                    end: w / 2,
+                    kind: SpanKind::Opaque,
+                });
+                s
+            }
+        }
+
+        /// Returns overlapping spans.
+        pub struct OverlappingSpans;
+        impl MaskSource for OverlappingSpans {
+            fn fill_mask_row(&self, dst: &mut [f32], _y: u32) -> MaskFill {
+                dst.fill(0.5);
+                MaskFill::Partial
+            }
+            fn mask_spans(&self, dst: &mut [f32], _y: u32) -> MaskSpans {
+                let w = dst.len() as u32;
+                let mut s = MaskSpans::new();
+                s.push(MaskSpan {
+                    start: 0,
+                    end: w,
+                    kind: SpanKind::Opaque,
+                });
+                s.push(MaskSpan {
+                    start: 0, // overlap
+                    end: w,
+                    kind: SpanKind::Opaque,
+                });
+                s
+            }
+        }
+
+        /// Returns no spans at all.
+        pub struct EmptySpans;
+        impl MaskSource for EmptySpans {
+            fn fill_mask_row(&self, dst: &mut [f32], _y: u32) -> MaskFill {
+                dst.fill(1.0);
+                MaskFill::AllOpaque
+            }
+            fn mask_spans(&self, _dst: &mut [f32], _y: u32) -> MaskSpans {
+                MaskSpans::new()
+            }
+        }
+
+        /// Returns reversed range (start > end).
+        pub struct ReversedSpan;
+        impl MaskSource for ReversedSpan {
+            fn fill_mask_row(&self, dst: &mut [f32], _y: u32) -> MaskFill {
+                dst.fill(0.0);
+                MaskFill::AllTransparent
+            }
+            fn mask_spans(&self, dst: &mut [f32], _y: u32) -> MaskSpans {
+                let w = dst.len() as u32;
+                let mut s = MaskSpans::new();
+                s.push(MaskSpan {
+                    start: w,
+                    end: 0,
+                    kind: SpanKind::Transparent,
+                });
+                s
+            }
+        }
+    }
+
+    #[test]
+    fn apply_mask_spans_oob_does_not_panic() {
+        let mut fg = vec![0.5f32; 400];
+        let mut buf = vec![0.0f32; 100];
+        // Must not panic — fallback path uses fill_mask_row instead.
+        apply_mask_spans(&mut fg, &mut buf, &hostile_mask::OutOfBoundsSpans, 0);
+        // Fallback applied a partial mask of 0.5 → fg becomes 0.25
+        assert!(fg.iter().all(|v| (v - 0.25).abs() < 1e-6));
+    }
+
+    #[test]
+    fn apply_mask_spans_gappy_falls_back() {
+        let mut fg = vec![0.7f32; 400];
+        let mut buf = vec![0.0f32; 100];
+        // Buggy impl says only [0, 50) is opaque — without validation, [50, 100)
+        // would silently retain unprocessed values. With validation, fallback
+        // to fill_mask_row covers the full row.
+        apply_mask_spans(&mut fg, &mut buf, &hostile_mask::GappySpans, 0);
+        // GappySpans's fill_mask_row returns AllOpaque → fg unchanged
+        assert!(fg.iter().all(|v| (v - 0.7).abs() < 1e-6));
+    }
+
+    #[test]
+    fn apply_mask_spans_overlapping_does_not_panic() {
+        let mut fg = vec![0.5f32; 400];
+        let mut buf = vec![0.0f32; 100];
+        apply_mask_spans(&mut fg, &mut buf, &hostile_mask::OverlappingSpans, 0);
+        // OverlappingSpans.fill_mask_row returns Partial with mask=0.5 → fg=0.25
+        assert!(fg.iter().all(|v| (v - 0.25).abs() < 1e-6));
+    }
+
+    #[test]
+    fn apply_mask_spans_empty_falls_back() {
+        let mut fg = vec![0.7f32; 400];
+        let mut buf = vec![0.0f32; 100];
+        apply_mask_spans(&mut fg, &mut buf, &hostile_mask::EmptySpans, 0);
+        // EmptySpans.fill_mask_row returns AllOpaque → fg unchanged
+        assert!(fg.iter().all(|v| (v - 0.7).abs() < 1e-6));
+    }
+
+    #[test]
+    fn apply_mask_spans_reversed_does_not_panic() {
+        let mut fg = vec![0.5f32; 400];
+        let mut buf = vec![0.0f32; 100];
+        apply_mask_spans(&mut fg, &mut buf, &hostile_mask::ReversedSpan, 0);
+        // ReversedSpan.fill_mask_row returns AllTransparent → fg = 0
+        assert!(fg.iter().all(|&v| v == 0.0));
+    }
+
+    #[test]
+    fn artistic_blend_nan_input_does_not_propagate() {
+        // Multiply mode: artistic blend. Inject NaN in fg alpha — output must
+        // be sanitized to a finite value, not NaN.
+        let nan = f32::NAN;
+        let mut fg = vec![0.5, 0.5, 0.5, nan];
+        let bg = vec![0.5, 0.5, 0.5, 1.0];
+        blend_row(&mut fg, &bg, BlendMode::Multiply);
+        for (i, &v) in fg.iter().enumerate() {
+            assert!(v.is_finite(), "channel {i} is NaN/inf: {v}");
+        }
+    }
+
+    #[test]
+    fn artistic_blend_nan_color_does_not_propagate() {
+        // NaN in fg color channel — must not propagate via alpha.
+        let nan = f32::NAN;
+        let mut fg = vec![nan, 0.5, 0.5, 0.5];
+        let bg = vec![0.5, 0.5, 0.5, 0.5];
+        blend_row(&mut fg, &bg, BlendMode::Screen);
+        // Alpha must remain finite even if a color channel got zeroed
+        assert!(fg[3].is_finite(), "alpha became non-finite: {}", fg[3]);
+        for (i, &v) in fg.iter().enumerate() {
+            assert!(v.is_finite(), "channel {i} is non-finite: {v}");
+        }
+    }
+
+    #[test]
+    fn artistic_blend_color_dodge_division_safe() {
+        // ColorDodge: d / (1 - s). With sa near 0, inv_sa = 0, but for sa > 0
+        // and unpremultiplied s = fg[i]/sa, if fg[i] is e.g. very large the
+        // division could produce inf which our sanitizer must clamp.
+        let mut fg = vec![1e30, 1e30, 1e30, 1.0];
+        let bg = vec![0.5, 0.5, 0.5, 1.0];
+        blend_row(&mut fg, &bg, BlendMode::ColorDodge);
+        for (i, &v) in fg.iter().enumerate() {
+            assert!(v.is_finite(), "channel {i} is non-finite: {v}");
         }
     }
 }
