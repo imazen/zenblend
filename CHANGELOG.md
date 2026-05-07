@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+- `apply_mask_spans` now validates spans returned by `MaskSource` impls (coverage, ordering, in-range bounds) and falls back to `fill_mask_row` when validation fails; a buggy or hostile `MaskSource` can no longer panic via slice OOB.
+- Artistic blend modes (Multiply, Screen, Overlay, ColorDodge, ColorBurn, etc.) sanitize NaN/inf in input alpha and per-channel output, replacing non-finite results with 0 instead of poisoning downstream blends.
+
 ## [0.1.3] - 2026-04-17
 
 ### Added

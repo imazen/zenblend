@@ -391,7 +391,12 @@ fn blend_artistic_pixel(fg: &mut [f32; 4], bg: &[f32; 4], f: impl Fn(f32, f32) -
     // Output alpha: same as SrcOver
     let out_a = sa + da - sa * da;
 
-    if out_a <= 0.0 {
+    // Treat non-finite inputs (NaN or inf, from corrupt or un-sanitized
+    // upstream pixels) the same as the zero-alpha case. The plain
+    // `<= 0.0` guard misses NaN (NaN comparisons are always false) and
+    // misses +inf, letting non-finite values flow into out_a and poison
+    // every downstream blend. `!is_finite()` catches both.
+    if !out_a.is_finite() || out_a <= 0.0 {
         *fg = [0.0, 0.0, 0.0, 0.0];
         return;
     }
@@ -406,7 +411,11 @@ fn blend_artistic_pixel(fg: &mut [f32; 4], bg: &[f32; 4], f: impl Fn(f32, f32) -
         let blended = f(cs, cd);
         // General premultiplied formula:
         // out_c = (1 - da) * fg[i] + (1 - sa) * bg[i] + sa * da * blended
-        fg[i] = (1.0 - da) * fg[i] + (1.0 - sa) * bg[i] + sa * da * blended;
+        let out = (1.0 - da) * fg[i] + (1.0 - sa) * bg[i] + sa * da * blended;
+        // Sanitize: NaN can leak from cs/cd if upstream pixels carry NaN, or
+        // from blend kernels with division (color_dodge/color_burn/divide).
+        // Replace non-finite outputs with 0.0 to avoid poisoning later passes.
+        fg[i] = if out.is_finite() { out } else { 0.0 };
     }
     fg[3] = out_a;
 }
