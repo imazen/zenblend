@@ -46,6 +46,68 @@ pub(crate) fn lerp_row_apply_scalar(
     portable::lerp_row_apply(t, a, b, tv, out);
 }
 
+// Artistic-mode SIMD kernels. Each gets a public `incant!`-dispatched entry plus
+// per-tier token wrappers (scalar always; neon/wasm128 in the cfg modules below).
+// The macro takes the public name, the per-tier wrapper names, and the portable
+// kernel it delegates to, so there is one source of truth per mode.
+macro_rules! artistic_kernel {
+    ($pub_name:ident, $scalar:ident, $neon:ident, $wasm:ident, $portable:ident) => {
+        pub(crate) fn $pub_name(fg: &mut [f32], bg: &[f32]) {
+            // Only NEON / WASM128 SIMD kernels exist for the artistic modes;
+            // x86 falls back to the scalar reference (already SIMD-competitive
+            // there via the autovectorizer). The explicit tier list keeps the
+            // macro from looking for nonexistent `_v3` / `_v4` x86 variants.
+            archmage::incant!($pub_name(fg, bg), [neon, wasm128, scalar])
+        }
+        pub(crate) fn $scalar(t: ScalarToken, fg: &mut [f32], bg: &[f32]) {
+            portable::$portable(t, fg, bg);
+        }
+    };
+}
+
+artistic_kernel!(
+    blend_multiply,
+    blend_multiply_scalar,
+    blend_multiply_neon,
+    blend_multiply_wasm128,
+    blend_multiply_simd
+);
+artistic_kernel!(
+    blend_screen,
+    blend_screen_scalar,
+    blend_screen_neon,
+    blend_screen_wasm128,
+    blend_screen_simd
+);
+artistic_kernel!(
+    blend_darken,
+    blend_darken_scalar,
+    blend_darken_neon,
+    blend_darken_wasm128,
+    blend_darken_simd
+);
+artistic_kernel!(
+    blend_lighten,
+    blend_lighten_scalar,
+    blend_lighten_neon,
+    blend_lighten_wasm128,
+    blend_lighten_simd
+);
+artistic_kernel!(
+    blend_difference,
+    blend_difference_scalar,
+    blend_difference_neon,
+    blend_difference_wasm128,
+    blend_difference_simd
+);
+artistic_kernel!(
+    blend_exclusion,
+    blend_exclusion_scalar,
+    blend_exclusion_neon,
+    blend_exclusion_wasm128,
+    blend_exclusion_simd
+);
+
 #[cfg(target_arch = "aarch64")]
 mod _neon_wrappers {
     use archmage::NeonToken;
@@ -73,6 +135,20 @@ mod _neon_wrappers {
     ) {
         super::portable::lerp_row_apply(t, a, b, tv, out);
     }
+
+    macro_rules! artistic_neon {
+        ($name:ident, $portable:ident) => {
+            pub(crate) fn $name(t: NeonToken, fg: &mut [f32], bg: &[f32]) {
+                super::portable::$portable(t, fg, bg);
+            }
+        };
+    }
+    artistic_neon!(blend_multiply_neon, blend_multiply_simd);
+    artistic_neon!(blend_screen_neon, blend_screen_simd);
+    artistic_neon!(blend_darken_neon, blend_darken_simd);
+    artistic_neon!(blend_lighten_neon, blend_lighten_simd);
+    artistic_neon!(blend_difference_neon, blend_difference_simd);
+    artistic_neon!(blend_exclusion_neon, blend_exclusion_simd);
 }
 #[cfg(target_arch = "aarch64")]
 #[allow(unused_imports)]
@@ -109,6 +185,20 @@ mod _wasm_wrappers {
     ) {
         super::portable::lerp_row_apply(t, a, b, tv, out);
     }
+
+    macro_rules! artistic_wasm {
+        ($name:ident, $portable:ident) => {
+            pub(crate) fn $name(t: Wasm128Token, fg: &mut [f32], bg: &[f32]) {
+                super::portable::$portable(t, fg, bg);
+            }
+        };
+    }
+    artistic_wasm!(blend_multiply_wasm128, blend_multiply_simd);
+    artistic_wasm!(blend_screen_wasm128, blend_screen_simd);
+    artistic_wasm!(blend_darken_wasm128, blend_darken_simd);
+    artistic_wasm!(blend_lighten_wasm128, blend_lighten_simd);
+    artistic_wasm!(blend_difference_wasm128, blend_difference_simd);
+    artistic_wasm!(blend_exclusion_wasm128, blend_exclusion_simd);
 }
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]

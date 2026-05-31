@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Changed
+- SIMD-accelerated six separable artistic blend modes (Multiply, Screen, Darken, Lighten, Difference, Exclusion) on NEON/WASM128 via division-free premultiplied closed forms, replacing the scalar per-pixel unpremultiply path. Measured **+60–102%** throughput on Ampere Altra Neoverse-N1 (e.g. Screen 108→217 Mpix/s, Exclusion 103→207 Mpix/s). x86 keeps the scalar path. Bit-faithful to the scalar reference within 1e-6 (verified by new equivalence tests + existing per-mode/cross-tier tests). See `benchmarks/arm_neoverse_n1_baseline_2026-05-29.md`.
+
 ### Fixed
 - `apply_mask_spans` now validates spans returned by `MaskSource` impls (coverage, ordering, in-range bounds) and falls back to `fill_mask_row` when validation fails; a buggy or hostile `MaskSource` can no longer panic via slice OOB.
 - Artistic blend modes (Multiply, Screen, Overlay, ColorDodge, ColorBurn, etc.) sanitize NaN/inf in input alpha and per-channel output, replacing non-finite results with 0 instead of poisoning downstream blends.
