@@ -22,17 +22,24 @@ pub(crate) fn dispatch_blend_row(fg: &mut [f32], bg: &[f32], mode: BlendMode) {
         BlendMode::SrcAtop => blend_src_atop(fg, bg),
         BlendMode::DstAtop => blend_dst_atop(fg, bg),
         BlendMode::Xor => blend_xor(fg, bg),
-        BlendMode::Multiply => blend_multiply(fg, bg),
-        BlendMode::Screen => blend_screen(fg, bg),
+        // SIMD-dispatched separable artistic modes (NEON/WASM128; scalar on x86).
+        // These six reduce to a division-free polynomial in the PREMULTIPLIED
+        // fg/bg, so the whole row is pure vector mul/add/min/max — a big win on
+        // NEON where the scalar unpremultiply division is the bottleneck.
+        BlendMode::Multiply => simd::blend_multiply(fg, bg),
+        BlendMode::Screen => simd::blend_screen(fg, bg),
+        BlendMode::Darken => simd::blend_darken(fg, bg),
+        BlendMode::Lighten => simd::blend_lighten(fg, bg),
+        BlendMode::Difference => simd::blend_difference(fg, bg),
+        BlendMode::Exclusion => simd::blend_exclusion(fg, bg),
+        // The remaining modes either need a per-lane unpremultiply/clamp or a
+        // both-branches lane select; on the non-pipelined N1 those lost to the
+        // scalar single-branch reference, so they stay scalar.
         BlendMode::Overlay => blend_overlay(fg, bg),
-        BlendMode::Darken => blend_darken(fg, bg),
-        BlendMode::Lighten => blend_lighten(fg, bg),
         BlendMode::HardLight => blend_hard_light(fg, bg),
         BlendMode::SoftLight => blend_soft_light(fg, bg),
         BlendMode::ColorDodge => blend_color_dodge(fg, bg),
         BlendMode::ColorBurn => blend_color_burn(fg, bg),
-        BlendMode::Difference => blend_difference(fg, bg),
-        BlendMode::Exclusion => blend_exclusion(fg, bg),
         BlendMode::LinearBurn => blend_linear_burn(fg, bg),
         BlendMode::LinearDodge => blend_linear_dodge(fg, bg),
         BlendMode::VividLight => blend_vivid_light(fg, bg),
@@ -424,8 +431,15 @@ fn blend_artistic_pixel(fg: &mut [f32; 4], bg: &[f32; 4], f: impl Fn(f32, f32) -
 
 macro_rules! artistic_row {
     ($name:ident, $f:expr) => {
+        // Several of these scalar row kernels are now superseded by the
+        // SIMD-dispatched versions in `crate::simd` for NEON/WASM128 targets
+        // (they remain the scalar reference used by the equivalence tests and
+        // the still-scalar modes: soft_light / color_dodge / color_burn /
+        // vivid_light / hard_mix / divide). Allow dead_code so the unmigrated
+        // duplicates don't warn.
         #[inline]
-        fn $name(fg: &mut [f32], bg: &[f32]) {
+        #[allow(dead_code)]
+        pub(crate) fn $name(fg: &mut [f32], bg: &[f32]) {
             for (s, b) in fg.chunks_exact_mut(4).zip(bg.chunks_exact(4)) {
                 let mut pixel: [f32; 4] = [s[0], s[1], s[2], s[3]];
                 let bg_pixel: [f32; 4] = [b[0], b[1], b[2], b[3]];
@@ -558,4 +572,113 @@ fn blend_plus_pixel(fg: &mut [f32; 4], bg: &[f32; 4]) {
     fg[1] = (fg[1] + bg[1]).min(1.0);
     fg[2] = (fg[2] + bg[2]).min(1.0);
     fg[3] = (fg[3] + bg[3]).min(1.0);
+}
+
+#[cfg(test)]
+mod simd_equiv_tests {
+    //! Verify that the SIMD-dispatched artistic kernels in `crate::simd`
+    //! reproduce the scalar reference formula (`blend_artistic_pixel` via the
+    //! `artistic_row!` kernels) within f32 rounding tolerance, across random
+    //! premultiplied pixels plus alpha / saturation edge cases.
+
+    use super::*;
+    use crate::BlendMode;
+
+    fn gen_row(n: usize, seed: u64) -> Vec<f32> {
+        let mut s = seed.wrapping_add(0x9E3779B97F4A7C15);
+        let mut next = || {
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            (s >> 11) as f32 / (1u64 << 53) as f32
+        };
+        let mut v = Vec::with_capacity(n * 4);
+        for i in 0..n {
+            // Inject edge cases at fixed indices: a=0, a=1, fully saturated.
+            let a = match i % 17 {
+                0 => 0.0,
+                1 => 1.0,
+                2 => 1e-7,
+                _ => next(),
+            };
+            let r = (next() * a).min(a);
+            let g = (next() * a).min(a);
+            let b = (next() * a).min(a);
+            v.extend_from_slice(&[r, g, b, a]);
+        }
+        v
+    }
+
+    /// Returns (max_abs_diff, count_of_pixels_with_diff_over_tol).
+    fn compare(
+        mode: BlendMode,
+        scalar_ref: fn(&mut [f32], &[f32]),
+        n: usize,
+        seed: u64,
+        tol: f32,
+    ) -> (f32, usize) {
+        let bg = gen_row(n, seed);
+        let fg0 = gen_row(n, seed ^ 0xABCDEF);
+
+        let mut fg_simd = fg0.clone();
+        dispatch_blend_row(&mut fg_simd, &bg, mode);
+
+        let mut fg_scalar = fg0.clone();
+        scalar_ref(&mut fg_scalar, &bg);
+
+        let mut max_diff = 0.0f32;
+        let mut over = 0usize;
+        for (px_s, px_r) in fg_simd.chunks_exact(4).zip(fg_scalar.chunks_exact(4)) {
+            let mut pmax = 0.0f32;
+            for (a, b) in px_s.iter().zip(px_r.iter()) {
+                let d = (a - b).abs();
+                pmax = pmax.max(d);
+            }
+            max_diff = max_diff.max(pmax);
+            if pmax > tol {
+                over += 1;
+            }
+        }
+        (max_diff, over)
+    }
+
+    macro_rules! equiv_test {
+        ($test:ident, $mode:expr, $scalar_ref:ident) => {
+            #[test]
+            fn $test() {
+                let (max_diff, over) = compare($mode, $scalar_ref, 2048, 0x1234, 1e-6);
+                assert!(
+                    over == 0,
+                    "{:?}: {over} pixels exceed 1e-6 tol (max_diff={max_diff})",
+                    $mode
+                );
+            }
+        };
+    }
+
+    // Only the six SIMD-dispatched modes (division-free premultiplied closed
+    // forms). Each must match the scalar divide-then-remultiply reference to
+    // within 1e-6 across random pixels + alpha/saturation edge cases.
+    equiv_test!(
+        multiply_simd_matches_scalar,
+        BlendMode::Multiply,
+        blend_multiply
+    );
+    equiv_test!(screen_simd_matches_scalar, BlendMode::Screen, blend_screen);
+    equiv_test!(darken_simd_matches_scalar, BlendMode::Darken, blend_darken);
+    equiv_test!(
+        lighten_simd_matches_scalar,
+        BlendMode::Lighten,
+        blend_lighten
+    );
+    equiv_test!(
+        difference_simd_matches_scalar,
+        BlendMode::Difference,
+        blend_difference
+    );
+    equiv_test!(
+        exclusion_simd_matches_scalar,
+        BlendMode::Exclusion,
+        blend_exclusion
+    );
 }

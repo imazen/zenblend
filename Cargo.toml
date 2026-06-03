@@ -28,4 +28,8 @@ safe_unaligned_simd = "0.2.5"
 name = "mask_spans"
 harness = false
 
+[[bench]]
+name = "blend_modes"
+harness = false
+
 [dev-dependencies]

@@ -82,6 +82,134 @@ pub(super) fn mask_row_rgb_apply<T: F32x4Backend>(token: T, fg: &mut [f32], mask
     }
 }
 
+// =============================================================================
+// SIMD artistic blend modes (separable) via magetypes f32x4.
+// =============================================================================
+//
+// Division-free premultiplied closed forms.
+//
+// For the separable modes whose `sa·da·f(cs,cd)` term cancels the unpremultiply
+// reciprocals, the whole composite reduces to a polynomial in the PREMULTIPLIED
+// fg/bg plus the scalar alphas. This eliminates BOTH per-pixel scalar divisions
+// (the N1 FDIV bottleneck) and the cs/cd vectors. Derivations (Cs=fg/sa, Cd=bg/da):
+//
+//   out_c = (1-da)·fg + (1-sa)·bg + sa·da·f(Cs,Cd)
+//
+//   Multiply  f=Cs·Cd     -> sa·da·Cs·Cd = fg·bg            -> fg + bg − fg·bg ... no:
+//             out = (1-da)fg+(1-sa)bg+fg·bg
+//   Screen    f=Cs+Cd−CsCd-> da·fg+sa·bg−fg·bg              -> fg + bg − fg·bg
+//   Darken    f=min(Cs,Cd)-> min(da·fg, sa·bg)              -> (1-da)fg+(1-sa)bg+min(da·fg,sa·bg)
+//   Lighten   f=max(Cs,Cd)-> max(da·fg, sa·bg)
+//   Exclusion f=Cs+Cd−2CsCd-> da·fg+sa·bg−2fg·bg            -> fg + bg − 2·fg·bg
+//   Difference f=|Cs−Cd|  -> |da·fg − sa·bg|                -> (1-da)fg+(1-sa)bg+|da·fg−sa·bg|
+//
+// These agree with the scalar (divide-then-remultiply) reference to within f32
+// rounding (verified by the equivalence tests in blend.rs) and are MORE robust
+// at sa→0 (no 0/0 → NaN). The per-pixel scalar work is now just `out_a` + guard.
+// =============================================================================
+
+/// Premultiplied closed-form kernel: `combine(token, fg_v, bg_v, base, sa, da)`
+/// returns the RGB output vector (lane 3 discarded, overwritten with out_a).
+/// `base = (1-da)·fg + (1-sa)·bg` is precomputed (shared by several modes).
+#[inline]
+fn artistic_premul_simd<T, F>(token: T, fg: &mut [f32], bg: &[f32], combine: F)
+where
+    T: F32x4Backend,
+    F: Fn(T, f32x4<T>, f32x4<T>, f32x4<T>, f32, f32) -> f32x4<T>,
+{
+    let (fg_chunks, _) = f32x4::<T>::partition_slice_mut(token, fg);
+    let (bg_chunks, _) = f32x4::<T>::partition_slice(token, bg);
+
+    for (fg_chunk, bg_chunk) in fg_chunks.iter_mut().zip(bg_chunks.iter()) {
+        let sa = fg_chunk[3];
+        let da = bg_chunk[3];
+        let out_a = sa + da - sa * da;
+
+        if !out_a.is_finite() || out_a <= 0.0 {
+            *fg_chunk = [0.0, 0.0, 0.0, 0.0];
+            continue;
+        }
+
+        let fg_v = f32x4::load(token, fg_chunk);
+        let bg_v = f32x4::load(token, bg_chunk);
+        // base = (1-da)·fg + (1-sa)·bg  (same operation order as scalar reference)
+        let base = fg_v * f32x4::splat(token, 1.0 - da) + bg_v * f32x4::splat(token, 1.0 - sa);
+
+        let out = combine(token, fg_v, bg_v, base, sa, da);
+
+        // Vectorized non-finite sanitization (matches the scalar reference's
+        // per-channel `is_finite` guard): `abs(x) < +inf` is false for both NaN
+        // (abs(NaN) is NaN; NaN < inf is false) and ±inf — so one masked select
+        // zeroes any non-finite lane. Avoids a per-pixel scalar branch loop.
+        let inf = f32x4::splat(token, f32::INFINITY);
+        let zero = f32x4::splat(token, 0.0);
+        let finite = out.abs().simd_lt(inf);
+        let clean = f32x4::blend(finite, out, zero);
+
+        // Splice the correct out_a into lane 3, keeping sanitized RGB in 0..2,
+        // without leaving SIMD. `rgb_sel` is true (all-bits) in lanes 0..2.
+        let rgb_sel = f32x4::from_array(token, [1.0, 1.0, 1.0, 0.0]).simd_gt(zero);
+        let result = f32x4::blend(rgb_sel, clean, f32x4::splat(token, out_a));
+
+        result.store(fg_chunk);
+    }
+}
+
+macro_rules! artistic_premul_fn {
+    ($name:ident, $f:expr) => {
+        #[inline]
+        pub(super) fn $name<T: F32x4Backend>(token: T, fg: &mut [f32], bg: &[f32]) {
+            artistic_premul_simd(token, fg, bg, $f);
+        }
+    };
+}
+
+// out = (1-da)fg + (1-sa)bg + fg·bg
+artistic_premul_fn!(
+    blend_multiply_simd,
+    |_t, fg: f32x4<T>, bg: f32x4<T>, base: f32x4<T>, _sa, _da| { base + fg * bg }
+);
+// out = fg + bg − fg·bg
+artistic_premul_fn!(
+    blend_screen_simd,
+    |_t, fg: f32x4<T>, bg: f32x4<T>, _base: f32x4<T>, _sa, _da| { (fg + bg) - fg * bg }
+);
+// out = fg + bg − 2·fg·bg
+artistic_premul_fn!(
+    blend_exclusion_simd,
+    |_t, fg: f32x4<T>, bg: f32x4<T>, _base: f32x4<T>, _sa, _da| {
+        let fb = fg * bg;
+        (fg + bg) - (fb + fb)
+    }
+);
+// out = base + min(da·fg, sa·bg)
+artistic_premul_fn!(
+    blend_darken_simd,
+    |t: T, fg: f32x4<T>, bg: f32x4<T>, base: f32x4<T>, sa, da| {
+        let dfg = fg * f32x4::splat(t, da);
+        let sbg = bg * f32x4::splat(t, sa);
+        base + dfg.min(sbg)
+    }
+);
+// out = base + max(da·fg, sa·bg)
+artistic_premul_fn!(
+    blend_lighten_simd,
+    |t: T, fg: f32x4<T>, bg: f32x4<T>, base: f32x4<T>, sa, da| {
+        let dfg = fg * f32x4::splat(t, da);
+        let sbg = bg * f32x4::splat(t, sa);
+        base + dfg.max(sbg)
+    }
+);
+// out = base + |da·fg − sa·bg|
+artistic_premul_fn!(
+    blend_difference_simd,
+    |t: T, fg: f32x4<T>, bg: f32x4<T>, base: f32x4<T>, sa, da| {
+        let dfg = fg * f32x4::splat(t, da);
+        let sbg = bg * f32x4::splat(t, sa);
+        base + (dfg - sbg).abs()
+    }
+);
+
 /// Linearly interpolate between two RGBA rows, magetypes f32x4.
 #[inline]
 pub(super) fn lerp_row_apply<T: F32x4Backend>(
