@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Added
+- Versioned public-API surface snapshot at `docs/public-api/zenblend.txt`,
+  regenerated on every `cargo test` by `tests-dev/public_api_doc.rs`
+  (`ZEN_API_DOC=check` verifies in CI's clippy job, `=off` skips elsewhere);
+  `just api-doc` / `api-doc-check` recipes. Lives in `tests-dev/` so the
+  include-whitelisted package tarball is unaffected.
+
 ### Changed
 - SIMD-accelerated six separable artistic blend modes (Multiply, Screen, Darken, Lighten, Difference, Exclusion) on NEON/WASM128 via division-free premultiplied closed forms, replacing the scalar per-pixel unpremultiply path. Measured **+60–102%** throughput on Ampere Altra Neoverse-N1 (e.g. Screen 108→217 Mpix/s, Exclusion 103→207 Mpix/s). x86 keeps the scalar path. Bit-faithful to the scalar reference within 1e-6 (verified by new equivalence tests + existing per-mode/cross-tier tests). See `benchmarks/arm_neoverse_n1_baseline_2026-05-29.md`.
 

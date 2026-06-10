@@ -13,6 +13,10 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CI: true
+  # Public-API snapshot regen (tests-dev/public_api_doc.rs) needs nightly
+  # rustdoc + cargo-public-api; only the clippy job carries them and runs
+  # the =check gate. Everywhere else the test skips.
+  ZEN_API_DOC: off
 
 jobs:
   test:
@@ -52,6 +56,16 @@ jobs:
       - name: Clippy (default)
         run: cargo clippy --all-targets -- -D warnings
 
+      - uses: dtolnay/rust-toolchain@nightly # rustdoc JSON for cargo-public-api
+      - uses: dtolnay/rust-toolchain@stable # restore stable as default
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-public-api
+      - name: Public-API snapshot is current
+        run: cargo test --test public_api_doc
+        env:
+          ZEN_API_DOC: check
+
   fmt:
     name: Format
     runs-on: ubuntu-latest
@@ -67,6 +81,10 @@ jobs:
   test-i686:
     name: Test (i686-unknown-linux-gnu)
     runs-on: ubuntu-latest
+    env:
+      # cross runs the full test targets inside a container where the
+      # workflow-level env doesn't reach — pass the snapshot skip through.
+      CROSS_CONTAINER_OPTS: "--env ZEN_API_DOC=off"
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable

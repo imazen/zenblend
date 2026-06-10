@@ -58,3 +58,7 @@ Cargo.toml.original.txt
 *.profdata
 fuzz-*.log
 .workongoing
+.jj/
+# stray self-referential symlink (predates jj colocation; kept untracked)
+/zenblend
+
