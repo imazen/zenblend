@@ -1,4 +1,8 @@
 Cargo.lock
+# ...but the apidoc snapshot-runner's lockfile IS committed (negation must
+# come after the global Cargo.lock ignore — last matching pattern wins).
+# Its target/ is already covered by the unanchored `target/` below.
+!apidoc/Cargo.lock
 
 # === Standard exclusions (do not depend on user ~/.gitignore) ===
 

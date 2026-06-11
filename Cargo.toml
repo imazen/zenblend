@@ -31,14 +31,3 @@ harness = false
 [[bench]]
 name = "blend_modes"
 harness = false
-
-# Lives in tests-dev/ (outside the `include` whitelist) so the published
-# crate ships neither the test nor its cargo-public-api/nightly-rustdoc
-# requirement; cargo strips this target from the packaged manifest.
-[[test]]
-name = "public_api_doc"
-path = "tests-dev/public_api_doc.rs"
-
-[dev-dependencies]
-# tests-dev/public_api_doc.rs parses `cargo metadata` to enumerate features.
-serde_json = "1.0.150"
