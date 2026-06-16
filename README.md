@@ -20,14 +20,23 @@ then re-premultiply. Plus operates directly on premultiplied data.
 
 ### Blending two rows
 
+**Argument direction (read this first).** In `blend_row(fg, bg, mode)`, `fg` is the
+**top** layer (Porter-Duff *source*, `Src`) and `bg` is the **bottom** layer
+(Porter-Duff *destination*, `Dst`). `BlendMode::SrcOver` composites `fg` **over**
+`bg` — i.e. `fg` is drawn on top, computing `Src + Dst·(1 - Src.alpha)`. The result
+is written back into `fg` in place; `bg` is read-only. Swapping the two arguments
+compiles cleanly but composites the layers in the wrong order (your overlay ends up
+*underneath*), so make sure the top layer is `fg`.
+
 ```rust
 use zenblend::{BlendMode, blend_row, blend_row_solid, blend_row_solid_opaque};
 
-// fg and bg are premultiplied linear f32, 4ch RGBA, equal length, divisible by 4.
-// fg is modified in place to contain the blended result.
+// fg = TOP layer (Src), bg = BOTTOM layer (Dst).
+// Both are premultiplied linear f32, 4ch RGBA, equal length, divisible by 4.
+// fg is modified in place to contain the blended result (bg is read-only).
 let mut fg = vec![0.5, 0.0, 0.0, 0.5,  0.0, 0.3, 0.0, 1.0];
 let bg =     vec![0.0, 0.3, 0.0, 1.0,  0.0, 0.0, 0.5, 0.5];
-blend_row(&mut fg, &bg, BlendMode::SrcOver);
+blend_row(&mut fg, &bg, BlendMode::SrcOver); // fg over bg
 
 // Blend against a solid color -- no row buffer needed for background.
 let mut row = vec![0.5, 0.0, 0.0, 0.5,  0.0, 0.3, 0.0, 1.0];
@@ -37,6 +46,103 @@ blend_row_solid(&mut row, &[0.2, 0.0, 0.0, 0.5], BlendMode::Multiply);
 let mut row2 = vec![0.5, 0.0, 0.0, 0.5,  0.0, 0.3, 0.0, 1.0];
 blend_row_solid_opaque(&mut row2, &[0.2, 0.1, 0.05, 1.0], BlendMode::SrcOver);
 ```
+
+### Compositing a sprite over a background (full round-trip)
+
+zenblend does **no format conversion**: it only blends premultiplied-linear-f32 rows.
+The caller owns both ends of the trip — linearize + premultiply on the way *in*, and
+un-premultiply + encode back to sRGB on the way *out*. There is no helper that turns
+the result back into displayable 8-bit pixels; you must do the inverse yourself.
+
+This example draws a sprite (the **top** layer, `fg`) over a background (the **bottom**
+layer, `bg`) at an `(x, y)` offset, working one row at a time. The sprite is placed by
+the caller's own row/column slicing — zenblend never sees coordinates.
+
+```rust
+use zenblend::{BlendMode, blend_row};
+
+// sRGB transfer functions (zenblend does NOT provide these — bring your own).
+fn srgb_to_linear(c: u8) -> f32 {
+    let c = c as f32 / 255.0;
+    if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+}
+fn linear_to_srgb(c: f32) -> u8 {
+    let c = c.clamp(0.0, 1.0);
+    let s = if c <= 0.0031308 { c * 12.92 } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 };
+    (s * 255.0 + 0.5) as u8
+}
+
+/// One RGBA pixel: straight-alpha sRGB-u8  ->  premultiplied-linear-f32.
+fn load_premul(px: &[u8; 4], out: &mut [f32; 4]) {
+    let a = px[3] as f32 / 255.0;
+    out[0] = srgb_to_linear(px[0]) * a; // premultiply RGB by alpha
+    out[1] = srgb_to_linear(px[1]) * a;
+    out[2] = srgb_to_linear(px[2]) * a;
+    out[3] = a;
+}
+
+/// One RGBA pixel: premultiplied-linear-f32  ->  straight-alpha sRGB-u8.
+fn store_unpremul(px: &[f32; 4], out: &mut [u8; 4]) {
+    let a = px[3];
+    let inv = if a > 0.0 { 1.0 / a } else { 0.0 }; // un-premultiply (guard a == 0)
+    out[0] = linear_to_srgb(px[0] * inv);
+    out[1] = linear_to_srgb(px[1] * inv);
+    out[2] = linear_to_srgb(px[2] * inv);
+    out[3] = (a * 255.0 + 0.5) as u8;
+}
+
+// --- Background (bottom layer) and sprite (top layer), both straight-alpha sRGB u8 ---
+let (bg_w, bg_h) = (4usize, 4usize);
+let mut background: Vec<u8> = vec![0; bg_w * bg_h * 4]; // your real bg pixels here
+for px in background.chunks_exact_mut(4) {
+    px.copy_from_slice(&[40, 80, 160, 255]); // opaque blue field
+}
+
+let (sp_w, sp_h) = (2usize, 2usize);
+let sprite: Vec<u8> = vec![255, 0, 0, 128].repeat(sp_w * sp_h); // 50%-alpha red
+
+// Caller-chosen placement. The sprite occupies bg columns dst_x..dst_x+sp_w
+// and bg rows dst_y..dst_y+sp_h (assume it fits; clip these ranges if it doesn't).
+let (dst_x, dst_y) = (1usize, 1usize);
+
+// Scratch f32 rows, reused across rows (one pixel = 4 floats).
+let mut fg_row = vec![0.0f32; sp_w * 4]; // sprite row, premultiplied-linear
+let mut bg_row = vec![0.0f32; sp_w * 4]; // background segment, premultiplied-linear
+
+for sy in 0..sp_h {
+    let by = dst_y + sy; // background row this sprite row lands on
+
+    // 1. Linearize + premultiply the sprite row (fg = TOP) ...
+    let sprite_row = &sprite[sy * sp_w * 4 .. (sy + 1) * sp_w * 4];
+    // ... and the matching background segment (bg = BOTTOM).
+    let bg_start = (by * bg_w + dst_x) * 4;
+    let bg_seg = &background[bg_start .. bg_start + sp_w * 4];
+    for x in 0..sp_w {
+        let s: &[u8; 4] = sprite_row[x * 4 .. x * 4 + 4].try_into().unwrap();
+        let b: &[u8; 4] = bg_seg[x * 4 .. x * 4 + 4].try_into().unwrap();
+        load_premul(s, (&mut fg_row[x * 4 .. x * 4 + 4]).try_into().unwrap());
+        load_premul(b, (&mut bg_row[x * 4 .. x * 4 + 4]).try_into().unwrap());
+    }
+
+    // 2. Blend: fg (sprite, top) OVER bg (background, bottom). Result lands in fg_row.
+    blend_row(&mut fg_row, &bg_row, BlendMode::SrcOver);
+
+    // 3. Un-premultiply + encode the result back to sRGB-u8 INTO the background.
+    let out_start = (by * bg_w + dst_x) * 4;
+    let out_seg = &mut background[out_start .. out_start + sp_w * 4];
+    for x in 0..sp_w {
+        let r: &[f32; 4] = fg_row[x * 4 .. x * 4 + 4].try_into().unwrap();
+        store_unpremul(r, (&mut out_seg[x * 4 .. x * 4 + 4]).try_into().unwrap());
+    }
+}
+// `background` now holds the composited image as straight-alpha sRGB-u8.
+```
+
+The three steps — **linearize + premultiply**, **`blend_row` (fg over bg)**, then
+**un-premultiply + encode** — are the full contract. Skip step 1 and you feed sRGB
+gamma values into a linear-light blend (wrong, too-dark edges). Skip step 3 and you
+hand back premultiplied-linear floats that no display expects. Both inverse halves
+are the caller's responsibility.
 
 ### Masking
 
