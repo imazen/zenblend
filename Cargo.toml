@@ -8,7 +8,8 @@ description = "Porter-Duff and artistic blend modes on premultiplied linear f32 
 repository = "https://github.com/imazen/zenblend"
 keywords = ["blend", "compositing", "porter-duff", "simd", "alpha"]
 categories = ["graphics", "multimedia::images"]
-include = ["src/**/*.rs", "benches/**/*.rs", "tests/**/*.rs", "Cargo.toml", "LICENSE-AGPL3", "LICENSE-COMMERCIAL", "README.md", "CHANGELOG.md"]
+readme = "README.crates.md"
+include = ["src/**/*.rs", "benches/**/*.rs", "tests/**/*.rs", "Cargo.toml", "LICENSE-AGPL3", "LICENSE-COMMERCIAL", "README.crates.md", "CHANGELOG.md"]
 
 [features]
 default = ["std"]

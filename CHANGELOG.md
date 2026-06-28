@@ -12,6 +12,9 @@
 ### Changed
 - SIMD-accelerated six separable artistic blend modes (Multiply, Screen, Darken, Lighten, Difference, Exclusion) on NEON/WASM128 via division-free premultiplied closed forms, replacing the scalar per-pixel unpremultiply path. Measured **+60–102%** throughput on Ampere Altra Neoverse-N1 (e.g. Screen 108→217 Mpix/s, Exclusion 103→207 Mpix/s). x86 keeps the scalar path. Bit-faithful to the scalar reference within 1e-6 (verified by new equivalence tests + existing per-mode/cross-tier tests). See `benchmarks/arm_neoverse_n1_baseline_2026-05-29.md`.
 
+### Documentation
+- Onboarding README overhaul: full badge row (CI/crates.io/lib.rs/docs.rs/MSRV/license), a `## Quick start` section, refreshed SIMD coverage (six artistic modes now NEON/WASM SIMD), a `## Benchmarks` section, and the rendered crosslink footer. Split a trimmed crates.io README into `README.crates.md` (generated from `README.md`; `readme = "README.crates.md"` in `Cargo.toml`) plus `benchmarks/README.md` methodology.
+
 ### Fixed
 - docs(readme): state `blend_row` `fg`=top/Src, `bg`=bottom/Dst direction + add full sprite-over-background round-trip example — prevents silent compositing-order/premultiply corruption found by insulated-developer test.
 - `apply_mask_spans` now validates spans returned by `MaskSource` impls (coverage, ordering, in-range bounds) and falls back to `fill_mask_row` when validation fails; a buggy or hostile `MaskSource` can no longer panic via slice OOB.

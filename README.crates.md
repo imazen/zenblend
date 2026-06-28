@@ -1,4 +1,6 @@
-# zenblend [![CI](https://img.shields.io/github/actions/workflow/status/imazen/zenblend/ci.yml?style=flat-square&label=CI)](https://github.com/imazen/zenblend/actions/workflows/ci.yml) [![crates.io](https://img.shields.io/crates/v/zenblend?style=flat-square)](https://crates.io/crates/zenblend) [![lib.rs](https://img.shields.io/crates/v/zenblend?style=flat-square&label=lib.rs&color=blue)](https://lib.rs/crates/zenblend) [![docs.rs](https://img.shields.io/docsrs/zenblend?style=flat-square)](https://docs.rs/zenblend) [![MSRV](https://img.shields.io/badge/MSRV-1.93-blue?style=flat-square)](https://doc.rust-lang.org/cargo/reference/manifest.html#the-rust-version-field) [![license](https://img.shields.io/crates/l/zenblend?style=flat-square)](#license)
+<!-- GENERATED FROM README.md by zenutils gen-readme-crates.sh — DO NOT EDIT. -->
+
+# zenblend [![CI](https://img.shields.io/github/actions/workflow/status/imazen/zenblend/ci.yml?style=flat-square&label=CI)](https://github.com/imazen/zenblend/actions/workflows/ci.yml)
 
 zenblend is a row-level pixel blending library for premultiplied linear f32 RGBA compositing pipelines: 32 Porter-Duff and artistic blend modes, masking, and interpolation. Pure Rust, `#![forbid(unsafe_code)]`, allocation-free, and SIMD-accelerated via runtime CPU dispatch.
 
@@ -244,27 +246,6 @@ Porter-Duff and artistic modes run a scalar per-pixel loop everywhere.
 Mask-span alignment is SIMD-aware: it snaps partial spans to block boundaries so the
 kernel only touches whole vectors.
 
-<!-- crates.io:skip-start -->
-## Benchmarks
-
-`benches/blend_modes.rs` reports per-mode kernel throughput (ns/row and Mpix/s) on a
-1920-px RGBA row; `benches/mask_spans.rs` covers span-based masking. Both are
-single-thread, in-memory throughput benches — the rows are synthesized into `Vec<f32>`
-before the timed loop (no I/O in the timed region) and built **without**
-`-C target-cpu=native` (runtime dispatch is what ships). These are internal
-kernel benches, not cross-library comparisons.
-
-```sh
-git clone https://github.com/imazen/zenblend && cd zenblend
-cargo bench --bench blend_modes
-cargo bench --bench mask_spans
-```
-
-The committed ARM-vs-x86 baseline that motivated the division-free artistic kernels is
-[`benchmarks/arm_neoverse_n1_baseline_2026-05-29.md`](benchmarks/arm_neoverse_n1_baseline_2026-05-29.md):
-on a Neoverse-N1, the six SIMD artistic modes gained **+60–102%**. Full methodology and
-reproduction: [benchmarks/README.md](benchmarks/README.md).
-<!-- crates.io:skip-end -->
 
 ## Limitations
 
