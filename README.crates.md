@@ -1,6 +1,6 @@
 <!-- GENERATED FROM README.md by zenutils gen-readme-crates.sh — DO NOT EDIT. -->
 
-# zenblend [![CI](https://img.shields.io/github/actions/workflow/status/imazen/zenblend/ci.yml?style=flat-square&label=CI)](https://github.com/imazen/zenblend/actions/workflows/ci.yml)
+# zenblend
 
 zenblend is a row-level pixel blending library for premultiplied linear f32 RGBA compositing pipelines: 32 Porter-Duff and artistic blend modes, masking, and interpolation. Pure Rust, `#![forbid(unsafe_code)]`, allocation-free, and SIMD-accelerated via runtime CPU dispatch.
 
