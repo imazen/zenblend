@@ -1,0 +1,27 @@
+# zenblend NEON vs forced-scalar — first tier-isolated measurement
+date:    2026-07-28
+host:    Apple M4 Pro (12 core), macOS, aarch64
+command: cargo bench --bench tier_isolation --features _dev
+build:   release, NO -C target-cpu=native
+input:   1920px premultiplied RGBA f32 rows, 100k iters per arm
+
+## Result
+
+| op                  | NEON       | scalar     | speedup |
+|---------------------|------------|------------|---------|
+| blend_row/Multiply  | 2857.2 ns  | 5027.5 ns  |  1.76x  |
+| lerp_row            |  872.7 ns  | 1358.7 ns  |  1.56x  |
+| blend_row/SrcOver   |  881.6 ns  | 1222.9 ns  |  1.39x  |
+| mask_row            |  608.4 ns  |  764.8 ns  |  1.26x  |
+
+No regression on any path.
+
+Worth noting: `blend_modes.rs` describes the artistic/Porter-Duff modes as
+"representative scalar" next to "the SIMD-dispatched SrcOver path", but
+Multiply measures 1.76x — the highest ratio here, above SrcOver's 1.39x. Those
+modes are SIMD-dispatched too. The header comment in blend_modes.rs is
+misleading on that point.
+
+Contract gotcha for anyone extending this bench: `lerp_row`'s `t` and
+`mask_row`'s `mask` are PER-PIXEL (width) slices, not per-component (width*4).
+Passing per-component slices trips a length assert at runtime.
