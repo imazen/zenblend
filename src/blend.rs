@@ -32,9 +32,24 @@ pub(crate) fn dispatch_blend_row(fg: &mut [f32], bg: &[f32], mode: BlendMode) {
         BlendMode::Lighten => simd::blend_lighten(fg, bg),
         BlendMode::Difference => simd::blend_difference(fg, bg),
         BlendMode::Exclusion => simd::blend_exclusion(fg, bg),
-        // The remaining modes either need a per-lane unpremultiply/clamp or a
-        // both-branches lane select; on the non-pipelined N1 those lost to the
-        // scalar single-branch reference, so they stay scalar.
+        // The remaining modes need a per-lane unpremultiply/clamp or a
+        // both-branches lane select, and they stay scalar. That was first
+        // recorded on a non-pipelined Graviton N1; RE-MEASURED 2026-07-28 on an
+        // Apple M-series (wide, out-of-order) with a real vector kernel written
+        // for Overlay and HardLight, and the conclusion HOLDS for a different
+        // reason — LLVM already autovectorizes these branchy scalar loops
+        // better than an explicit lane-select version does:
+        //
+        //   Overlay     scalar-fn arm 4333 ns/row   vector kernel 4981  (-15%)
+        //   HardLight   scalar-fn arm 4350 ns/row   vector kernel 5012  (-15%)
+        //
+        // Note the trap in those runs: the vector kernel reported 3.05x "vs its
+        // own scalar tier" while being 15% SLOWER in absolute terms, because it
+        // degraded the forced-scalar tier (4344 -> 15210 ns) faster than it
+        // helped NEON. A tier RATIO alone would have sold this as a 3x win.
+        //
+        // The division-free modes below are the opposite case and DID win: they
+        // remove the unpremultiply entirely rather than vectorizing around it.
         BlendMode::Overlay => blend_overlay(fg, bg),
         BlendMode::HardLight => blend_hard_light(fg, bg),
         BlendMode::SoftLight => blend_soft_light(fg, bg),
