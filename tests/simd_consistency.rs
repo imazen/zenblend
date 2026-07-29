@@ -158,3 +158,69 @@ fn lerp_row_all_tiers_match() {
         }
     });
 }
+
+/// Every blend mode, under every tier permutation.
+///
+/// The two tests above cover SrcOver and Multiply — 2 of 32 modes — so a tier
+/// disagreement in any other mode was invisible here. That matters more now
+/// that LinearDodge / LinearBurn / Subtract have moved onto the shared
+/// premultiplied SIMD kernels: their scalar and NEON tiers must agree, and
+/// this is what proves it rather than the fact that they share source.
+#[test]
+fn every_blend_mode_all_tiers_match() {
+    const ALL_MODES: &[(&str, BlendMode)] = &[
+        ("Clear", BlendMode::Clear),
+        ("Src", BlendMode::Src),
+        ("Dst", BlendMode::Dst),
+        ("SrcOver", BlendMode::SrcOver),
+        ("DstOver", BlendMode::DstOver),
+        ("SrcIn", BlendMode::SrcIn),
+        ("DstIn", BlendMode::DstIn),
+        ("SrcOut", BlendMode::SrcOut),
+        ("DstOut", BlendMode::DstOut),
+        ("SrcAtop", BlendMode::SrcAtop),
+        ("DstAtop", BlendMode::DstAtop),
+        ("Xor", BlendMode::Xor),
+        ("Multiply", BlendMode::Multiply),
+        ("Screen", BlendMode::Screen),
+        ("Overlay", BlendMode::Overlay),
+        ("Darken", BlendMode::Darken),
+        ("Lighten", BlendMode::Lighten),
+        ("HardLight", BlendMode::HardLight),
+        ("SoftLight", BlendMode::SoftLight),
+        ("ColorDodge", BlendMode::ColorDodge),
+        ("ColorBurn", BlendMode::ColorBurn),
+        ("Difference", BlendMode::Difference),
+        ("Exclusion", BlendMode::Exclusion),
+        ("LinearBurn", BlendMode::LinearBurn),
+        ("LinearDodge", BlendMode::LinearDodge),
+        ("VividLight", BlendMode::VividLight),
+        ("LinearLight", BlendMode::LinearLight),
+        ("PinLight", BlendMode::PinLight),
+        ("HardMix", BlendMode::HardMix),
+        ("Divide", BlendMode::Divide),
+        ("Subtract", BlendMode::Subtract),
+        ("Plus", BlendMode::Plus),
+    ];
+
+    let bg = generate_rgba_row(PIXELS, 7);
+    let fg_template = generate_rgba_row(PIXELS, 13);
+
+    for &(name, mode) in ALL_MODES {
+        let mut reference: Option<Vec<f32>> = None;
+        let _ = for_each_token_permutation(CompileTimePolicy::Warn, |perm| {
+            let mut fg = fg_template.clone();
+            blend_row(&mut fg, &bg, mode);
+            if let Some(ref ref_data) = reference {
+                let diff = max_abs_diff(ref_data, &fg);
+                assert!(
+                    diff < 1e-6,
+                    "{name} differs under '{}': max_diff={diff}",
+                    perm.label,
+                );
+            } else {
+                reference = Some(fg);
+            }
+        });
+    }
+}

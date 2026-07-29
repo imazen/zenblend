@@ -101,6 +101,27 @@ artistic_kernel!(
     blend_difference_simd
 );
 artistic_kernel!(
+    blend_linear_dodge,
+    blend_linear_dodge_scalar,
+    blend_linear_dodge_neon,
+    blend_linear_dodge_wasm128,
+    blend_linear_dodge_simd
+);
+artistic_kernel!(
+    blend_linear_burn,
+    blend_linear_burn_scalar,
+    blend_linear_burn_neon,
+    blend_linear_burn_wasm128,
+    blend_linear_burn_simd
+);
+artistic_kernel!(
+    blend_subtract,
+    blend_subtract_scalar,
+    blend_subtract_neon,
+    blend_subtract_wasm128,
+    blend_subtract_simd
+);
+artistic_kernel!(
     blend_exclusion,
     blend_exclusion_scalar,
     blend_exclusion_neon,
@@ -143,6 +164,9 @@ mod _neon_wrappers {
             }
         };
     }
+    artistic_neon!(blend_linear_dodge_neon, blend_linear_dodge_simd);
+    artistic_neon!(blend_linear_burn_neon, blend_linear_burn_simd);
+    artistic_neon!(blend_subtract_neon, blend_subtract_simd);
     artistic_neon!(blend_multiply_neon, blend_multiply_simd);
     artistic_neon!(blend_screen_neon, blend_screen_simd);
     artistic_neon!(blend_darken_neon, blend_darken_simd);
@@ -193,6 +217,9 @@ mod _wasm_wrappers {
             }
         };
     }
+    artistic_wasm!(blend_linear_dodge_wasm128, blend_linear_dodge_simd);
+    artistic_wasm!(blend_linear_burn_wasm128, blend_linear_burn_simd);
+    artistic_wasm!(blend_subtract_wasm128, blend_subtract_simd);
     artistic_wasm!(blend_multiply_wasm128, blend_multiply_simd);
     artistic_wasm!(blend_screen_wasm128, blend_screen_simd);
     artistic_wasm!(blend_darken_wasm128, blend_darken_simd);

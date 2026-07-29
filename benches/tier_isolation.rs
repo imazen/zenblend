@@ -137,16 +137,50 @@ fn main() {
         mask_row(black_box(&mut dst3), black_box(&mask));
     });
 
-    // A representative non-SrcOver mode: if these dispatch to SIMD too, the
-    // ratio shows it; if they are scalar-only, the ratio is ~1.00x and that is
-    // the useful fact.
+    // Every blend mode. The bench previously covered SrcOver and Multiply
+    // only — 2 of 32 — so a mode whose SIMD path loses to its own scalar
+    // fallback was invisible for the other 30. That is exactly the gap that
+    // was hiding real regressions in zenresize and zenpng.
+    const ALL_MODES: &[(&str, BlendMode)] = &[
+        ("Clear", BlendMode::Clear),
+        ("Src", BlendMode::Src),
+        ("Dst", BlendMode::Dst),
+        ("SrcOver", BlendMode::SrcOver),
+        ("DstOver", BlendMode::DstOver),
+        ("SrcIn", BlendMode::SrcIn),
+        ("DstIn", BlendMode::DstIn),
+        ("SrcOut", BlendMode::SrcOut),
+        ("DstOut", BlendMode::DstOut),
+        ("SrcAtop", BlendMode::SrcAtop),
+        ("DstAtop", BlendMode::DstAtop),
+        ("Xor", BlendMode::Xor),
+        ("Multiply", BlendMode::Multiply),
+        ("Screen", BlendMode::Screen),
+        ("Overlay", BlendMode::Overlay),
+        ("Darken", BlendMode::Darken),
+        ("Lighten", BlendMode::Lighten),
+        ("HardLight", BlendMode::HardLight),
+        ("SoftLight", BlendMode::SoftLight),
+        ("ColorDodge", BlendMode::ColorDodge),
+        ("ColorBurn", BlendMode::ColorBurn),
+        ("Difference", BlendMode::Difference),
+        ("Exclusion", BlendMode::Exclusion),
+        ("LinearBurn", BlendMode::LinearBurn),
+        ("LinearDodge", BlendMode::LinearDodge),
+        ("VividLight", BlendMode::VividLight),
+        ("LinearLight", BlendMode::LinearLight),
+        ("PinLight", BlendMode::PinLight),
+        ("HardMix", BlendMode::HardMix),
+        ("Divide", BlendMode::Divide),
+        ("Subtract", BlendMode::Subtract),
+        ("Plus", BlendMode::Plus),
+    ];
+
     let mut dst4 = bg.clone();
-    ab("blend_row/Multiply", iters, || {
-        dst4.copy_from_slice(&bg);
-        blend_row(
-            black_box(&mut dst4),
-            black_box(&fg),
-            black_box(BlendMode::Multiply),
-        );
-    });
+    for &(name, mode) in ALL_MODES {
+        ab(&format!("blend_row/{name}"), iters, || {
+            dst4.copy_from_slice(&bg);
+            blend_row(black_box(&mut dst4), black_box(&fg), black_box(mode));
+        });
+    }
 }

@@ -210,6 +210,48 @@ artistic_premul_fn!(
     }
 );
 
+// Three more modes that are ALSO division-free in premultiplied space, and so
+// belong in this framework rather than in the generic unpremultiply path they
+// were using. With `Cs = cs/sa` and `Cb = cb/da`, the `sa*da*B(Cs,Cb)` term of
+// the compositing formula cancels both divisions exactly as it does for
+// darken/lighten above:
+//
+//   LinearDodge  sa*da*min(1, Cs+Cb)      = min(sa*da, da*cs + sa*cb)
+//   LinearBurn   sa*da*max(0, Cs+Cb-1)    = max(0, da*cs + sa*cb - sa*da)
+//   Subtract     sa*da*max(0, Cb-Cs)      = max(0, sa*cb - da*cs)
+//
+// Being division-free is not just faster — it removes a division by a
+// potentially tiny alpha, so these are also better conditioned than the
+// unpremultiplying reference they replace.
+
+// out = base + min(sa·da, da·fg + sa·bg)
+artistic_premul_fn!(
+    blend_linear_dodge_simd,
+    |t: T, fg: f32x4<T>, bg: f32x4<T>, base: f32x4<T>, sa, da| {
+        let dfg = fg * f32x4::splat(t, da);
+        let sbg = bg * f32x4::splat(t, sa);
+        base + f32x4::splat(t, sa * da).min(dfg + sbg)
+    }
+);
+// out = base + max(0, da·fg + sa·bg − sa·da)
+artistic_premul_fn!(
+    blend_linear_burn_simd,
+    |t: T, fg: f32x4<T>, bg: f32x4<T>, base: f32x4<T>, sa, da| {
+        let dfg = fg * f32x4::splat(t, da);
+        let sbg = bg * f32x4::splat(t, sa);
+        base + ((dfg + sbg) - f32x4::splat(t, sa * da)).max(f32x4::splat(t, 0.0))
+    }
+);
+// out = base + max(0, sa·bg − da·fg)
+artistic_premul_fn!(
+    blend_subtract_simd,
+    |t: T, fg: f32x4<T>, bg: f32x4<T>, base: f32x4<T>, sa, da| {
+        let dfg = fg * f32x4::splat(t, da);
+        let sbg = bg * f32x4::splat(t, sa);
+        base + (sbg - dfg).max(f32x4::splat(t, 0.0))
+    }
+);
+
 /// Linearly interpolate between two RGBA rows, magetypes f32x4.
 #[inline]
 pub(super) fn lerp_row_apply<T: F32x4Backend>(

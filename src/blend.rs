@@ -40,14 +40,14 @@ pub(crate) fn dispatch_blend_row(fg: &mut [f32], bg: &[f32], mode: BlendMode) {
         BlendMode::SoftLight => blend_soft_light(fg, bg),
         BlendMode::ColorDodge => blend_color_dodge(fg, bg),
         BlendMode::ColorBurn => blend_color_burn(fg, bg),
-        BlendMode::LinearBurn => blend_linear_burn(fg, bg),
-        BlendMode::LinearDodge => blend_linear_dodge(fg, bg),
+        BlendMode::LinearBurn => simd::blend_linear_burn(fg, bg),
+        BlendMode::LinearDodge => simd::blend_linear_dodge(fg, bg),
         BlendMode::VividLight => blend_vivid_light(fg, bg),
         BlendMode::LinearLight => blend_linear_light(fg, bg),
         BlendMode::PinLight => blend_pin_light(fg, bg),
         BlendMode::HardMix => blend_hard_mix(fg, bg),
         BlendMode::Divide => blend_divide(fg, bg),
-        BlendMode::Subtract => blend_subtract(fg, bg),
+        BlendMode::Subtract => simd::blend_subtract(fg, bg),
         BlendMode::Plus => blend_plus(fg, bg),
         // non_exhaustive: future variants
         #[allow(unreachable_patterns)]
