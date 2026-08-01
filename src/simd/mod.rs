@@ -24,6 +24,33 @@ use archmage::ScalarToken;
 pub(crate) fn blend_src_over_row_scalar(t: ScalarToken, fg: &mut [f32], bg: &[f32]) {
     portable::blend_src_over_row(t, fg, bg);
 }
+pub(crate) fn blend_dst_over_row_scalar(t: ScalarToken, fg: &mut [f32], bg: &[f32]) {
+    portable::blend_dst_over_row(t, fg, bg);
+}
+pub(crate) fn blend_src_in_row_scalar(t: ScalarToken, fg: &mut [f32], bg: &[f32]) {
+    portable::blend_src_in_row(t, fg, bg);
+}
+pub(crate) fn blend_dst_in_row_scalar(t: ScalarToken, fg: &mut [f32], bg: &[f32]) {
+    portable::blend_dst_in_row(t, fg, bg);
+}
+pub(crate) fn blend_src_out_row_scalar(t: ScalarToken, fg: &mut [f32], bg: &[f32]) {
+    portable::blend_src_out_row(t, fg, bg);
+}
+pub(crate) fn blend_dst_out_row_scalar(t: ScalarToken, fg: &mut [f32], bg: &[f32]) {
+    portable::blend_dst_out_row(t, fg, bg);
+}
+pub(crate) fn blend_src_atop_row_scalar(t: ScalarToken, fg: &mut [f32], bg: &[f32]) {
+    portable::blend_src_atop_row(t, fg, bg);
+}
+pub(crate) fn blend_dst_atop_row_scalar(t: ScalarToken, fg: &mut [f32], bg: &[f32]) {
+    portable::blend_dst_atop_row(t, fg, bg);
+}
+pub(crate) fn blend_xor_row_scalar(t: ScalarToken, fg: &mut [f32], bg: &[f32]) {
+    portable::blend_xor_row(t, fg, bg);
+}
+pub(crate) fn blend_plus_row_scalar(t: ScalarToken, fg: &mut [f32], bg: &[f32]) {
+    portable::blend_plus_row(t, fg, bg);
+}
 pub(crate) fn blend_src_over_solid_scalar(t: ScalarToken, fg: &mut [f32], px: &[f32; 4]) {
     portable::blend_src_over_solid(t, fg, px);
 }
@@ -135,6 +162,33 @@ mod _neon_wrappers {
     pub(crate) fn blend_src_over_row_neon(t: NeonToken, fg: &mut [f32], bg: &[f32]) {
         super::portable::blend_src_over_row(t, fg, bg);
     }
+    pub(crate) fn blend_dst_over_row_neon(t: NeonToken, fg: &mut [f32], bg: &[f32]) {
+        super::portable::blend_dst_over_row(t, fg, bg);
+    }
+    pub(crate) fn blend_src_in_row_neon(t: NeonToken, fg: &mut [f32], bg: &[f32]) {
+        super::portable::blend_src_in_row(t, fg, bg);
+    }
+    pub(crate) fn blend_dst_in_row_neon(t: NeonToken, fg: &mut [f32], bg: &[f32]) {
+        super::portable::blend_dst_in_row(t, fg, bg);
+    }
+    pub(crate) fn blend_src_out_row_neon(t: NeonToken, fg: &mut [f32], bg: &[f32]) {
+        super::portable::blend_src_out_row(t, fg, bg);
+    }
+    pub(crate) fn blend_dst_out_row_neon(t: NeonToken, fg: &mut [f32], bg: &[f32]) {
+        super::portable::blend_dst_out_row(t, fg, bg);
+    }
+    pub(crate) fn blend_src_atop_row_neon(t: NeonToken, fg: &mut [f32], bg: &[f32]) {
+        super::portable::blend_src_atop_row(t, fg, bg);
+    }
+    pub(crate) fn blend_dst_atop_row_neon(t: NeonToken, fg: &mut [f32], bg: &[f32]) {
+        super::portable::blend_dst_atop_row(t, fg, bg);
+    }
+    pub(crate) fn blend_xor_row_neon(t: NeonToken, fg: &mut [f32], bg: &[f32]) {
+        super::portable::blend_xor_row(t, fg, bg);
+    }
+    pub(crate) fn blend_plus_row_neon(t: NeonToken, fg: &mut [f32], bg: &[f32]) {
+        super::portable::blend_plus_row(t, fg, bg);
+    }
     pub(crate) fn blend_src_over_solid_neon(t: NeonToken, fg: &mut [f32], px: &[f32; 4]) {
         super::portable::blend_src_over_solid(t, fg, px);
     }
@@ -184,6 +238,34 @@ mod _wasm_wrappers {
     pub(crate) fn blend_src_over_row_wasm128(t: Wasm128Token, fg: &mut [f32], bg: &[f32]) {
         super::portable::blend_src_over_row(t, fg, bg);
     }
+    pub(crate) fn blend_dst_over_row_wasm128(t: Wasm128Token, fg: &mut [f32], bg: &[f32]) {
+        super::portable::blend_dst_over_row(t, fg, bg);
+    }
+    pub(crate) fn blend_src_in_row_wasm128(t: Wasm128Token, fg: &mut [f32], bg: &[f32]) {
+        super::portable::blend_src_in_row(t, fg, bg);
+    }
+    pub(crate) fn blend_dst_in_row_wasm128(t: Wasm128Token, fg: &mut [f32], bg: &[f32]) {
+        super::portable::blend_dst_in_row(t, fg, bg);
+    }
+    pub(crate) fn blend_src_out_row_wasm128(t: Wasm128Token, fg: &mut [f32], bg: &[f32]) {
+        super::portable::blend_src_out_row(t, fg, bg);
+    }
+    pub(crate) fn blend_dst_out_row_wasm128(t: Wasm128Token, fg: &mut [f32], bg: &[f32]) {
+        super::portable::blend_dst_out_row(t, fg, bg);
+    }
+    pub(crate) fn blend_src_atop_row_wasm128(t: Wasm128Token, fg: &mut [f32], bg: &[f32]) {
+        super::portable::blend_src_atop_row(t, fg, bg);
+    }
+    pub(crate) fn blend_dst_atop_row_wasm128(t: Wasm128Token, fg: &mut [f32], bg: &[f32]) {
+        super::portable::blend_dst_atop_row(t, fg, bg);
+    }
+    pub(crate) fn blend_xor_row_wasm128(t: Wasm128Token, fg: &mut [f32], bg: &[f32]) {
+        super::portable::blend_xor_row(t, fg, bg);
+    }
+    pub(crate) fn blend_plus_row_wasm128(t: Wasm128Token, fg: &mut [f32], bg: &[f32]) {
+        super::portable::blend_plus_row(t, fg, bg);
+    }
+
     pub(crate) fn blend_src_over_solid_wasm128(t: Wasm128Token, fg: &mut [f32], px: &[f32; 4]) {
         super::portable::blend_src_over_solid(t, fg, px);
     }
@@ -238,6 +320,43 @@ use _wasm_wrappers::*;
 /// SrcOver: fg[i] += bg[i] * (1 - fg_alpha). Row-based, 4ch RGBA.
 pub(crate) fn blend_src_over_row(fg: &mut [f32], bg: &[f32]) {
     archmage::incant!(blend_src_over_row(fg, bg))
+}
+
+/// DstOver: `out = bg + fg * (1 - bg_alpha)`. Dispatched like SrcOver.
+pub(crate) fn blend_dst_over_row(fg: &mut [f32], bg: &[f32]) {
+    archmage::incant!(blend_dst_over_row(fg, bg))
+}
+
+pub(crate) fn blend_src_in_row(fg: &mut [f32], bg: &[f32]) {
+    archmage::incant!(blend_src_in_row(fg, bg))
+}
+
+pub(crate) fn blend_dst_in_row(fg: &mut [f32], bg: &[f32]) {
+    archmage::incant!(blend_dst_in_row(fg, bg))
+}
+
+pub(crate) fn blend_src_out_row(fg: &mut [f32], bg: &[f32]) {
+    archmage::incant!(blend_src_out_row(fg, bg))
+}
+
+pub(crate) fn blend_dst_out_row(fg: &mut [f32], bg: &[f32]) {
+    archmage::incant!(blend_dst_out_row(fg, bg))
+}
+
+pub(crate) fn blend_src_atop_row(fg: &mut [f32], bg: &[f32]) {
+    archmage::incant!(blend_src_atop_row(fg, bg))
+}
+
+pub(crate) fn blend_dst_atop_row(fg: &mut [f32], bg: &[f32]) {
+    archmage::incant!(blend_dst_atop_row(fg, bg))
+}
+
+pub(crate) fn blend_xor_row(fg: &mut [f32], bg: &[f32]) {
+    archmage::incant!(blend_xor_row(fg, bg))
+}
+
+pub(crate) fn blend_plus_row(fg: &mut [f32], bg: &[f32]) {
+    archmage::incant!(blend_plus_row(fg, bg))
 }
 
 /// SrcOver solid: fg[i] += pixel[c] * (1 - fg_alpha). No row buffer.

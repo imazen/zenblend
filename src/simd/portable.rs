@@ -22,6 +22,82 @@ pub(super) fn blend_src_over_row<T: F32x4Backend>(token: T, fg: &mut [f32], bg: 
     }
 }
 
+/// DstOver row blend — `out = bg + fg * (1 - bg_alpha)`, 1 pixel per f32x4.
+///
+/// Mirror of [`blend_src_over_row`]. Every one of the four channels undergoes
+/// the identical operation (unlike premultiply, where alpha is special), so all
+/// four lanes do useful work with no masking or blending.
+///
+/// Added 2026-08-01: the nine Porter-Duff modes had NO SIMD path at all —
+/// `blend_dst_over` and its siblings were plain scalar loops, while SrcOver and
+/// the artistic modes were vectorized. The tier bench read ~1.00x for all nine,
+/// which looked like "SIMD isn't helping" but actually meant "both arms run the
+/// same scalar code because there is no SIMD arm to select."
+#[inline]
+pub(super) fn blend_dst_over_row<T: F32x4Backend>(token: T, fg: &mut [f32], bg: &[f32]) {
+    let (fg_chunks, _) = f32x4::<T>::partition_slice_mut(token, fg);
+    let (bg_chunks, _) = f32x4::<T>::partition_slice(token, bg);
+
+    for (fg_chunk, bg_chunk) in fg_chunks.iter_mut().zip(bg_chunks.iter()) {
+        let fg_pixel = f32x4::load(token, fg_chunk);
+        let bg_pixel = f32x4::load(token, bg_chunk);
+        // Note the asymmetry with SrcOver: the surviving alpha is the BG's.
+        let inv_da = f32x4::splat(token, 1.0 - bg_chunk[3]);
+        let result = bg_pixel + fg_pixel * inv_da;
+        result.store(fg_chunk);
+    }
+}
+
+/// The remaining Porter-Duff modes, one pixel per `f32x4`.
+///
+/// All of these apply the IDENTICAL operation to all four channels — alpha
+/// included — so every lane does useful work with no masking, no select, and
+/// no unpremultiply. That is what separates them from the 18 artistic modes,
+/// where three hand-written decompositions all lost (see
+/// `benchmarks/neon_unpremul_attempts_2026-07-31.md`); it is why these win and
+/// those did not.
+///
+/// `$body` receives `(fg, bg, sa, da)` as vectors — `sa`/`da` pre-splatted from
+/// the source and destination alpha respectively.
+macro_rules! porter_duff_row {
+    ($name:ident, $doc:expr, $body:expr) => {
+        #[doc = $doc]
+        #[inline]
+        pub(super) fn $name<T: F32x4Backend>(token: T, fg: &mut [f32], bg: &[f32]) {
+            let (fg_chunks, _) = f32x4::<T>::partition_slice_mut(token, fg);
+            let (bg_chunks, _) = f32x4::<T>::partition_slice(token, bg);
+            for (fg_chunk, bg_chunk) in fg_chunks.iter_mut().zip(bg_chunks.iter()) {
+                let sa = f32x4::splat(token, fg_chunk[3]);
+                let da = f32x4::splat(token, bg_chunk[3]);
+                let f = f32x4::load(token, fg_chunk);
+                let b = f32x4::load(token, bg_chunk);
+                let out: f32x4<T> = $body(token, f, b, sa, da);
+                out.store(fg_chunk);
+            }
+        }
+    };
+}
+
+porter_duff_row!(blend_src_in_row, "SrcIn: `fg * da`.",
+    |t: T, f: f32x4<T>, _b: f32x4<T>, _sa: f32x4<T>, da: f32x4<T>| { let _ = t; f * da });
+porter_duff_row!(blend_dst_in_row, "DstIn: `bg * sa`.",
+    |t: T, _f: f32x4<T>, b: f32x4<T>, sa: f32x4<T>, _da: f32x4<T>| { let _ = t; b * sa });
+porter_duff_row!(blend_src_out_row, "SrcOut: `fg * (1 - da)`.",
+    |t: T, f: f32x4<T>, _b: f32x4<T>, _sa: f32x4<T>, da: f32x4<T>| f * (f32x4::splat(t, 1.0) - da));
+porter_duff_row!(blend_dst_out_row, "DstOut: `bg * (1 - sa)`.",
+    |t: T, _f: f32x4<T>, b: f32x4<T>, sa: f32x4<T>, _da: f32x4<T>| b * (f32x4::splat(t, 1.0) - sa));
+porter_duff_row!(blend_src_atop_row, "SrcAtop: `fg*da + bg*(1 - sa)`.",
+    |t: T, f: f32x4<T>, b: f32x4<T>, sa: f32x4<T>, da: f32x4<T>| f * da + b * (f32x4::splat(t, 1.0) - sa));
+porter_duff_row!(blend_dst_atop_row, "DstAtop: `bg*sa + fg*(1 - da)`.",
+    |t: T, f: f32x4<T>, b: f32x4<T>, sa: f32x4<T>, da: f32x4<T>| b * sa + f * (f32x4::splat(t, 1.0) - da));
+porter_duff_row!(blend_xor_row, "Xor: `fg*(1 - da) + bg*(1 - sa)`.",
+    |t: T, f: f32x4<T>, b: f32x4<T>, sa: f32x4<T>, da: f32x4<T>| {
+        let one = f32x4::splat(t, 1.0);
+        f * (one - da) + b * (one - sa)
+    });
+porter_duff_row!(blend_plus_row, "Plus: `min(fg + bg, 1)`.",
+    |t: T, f: f32x4<T>, b: f32x4<T>, _sa: f32x4<T>, _da: f32x4<T>| (f + b).min(f32x4::splat(t, 1.0)));
+
 /// SrcOver solid pixel blend using magetypes f32x4.
 #[inline]
 pub(super) fn blend_src_over_solid<T: F32x4Backend>(token: T, fg: &mut [f32], pixel: &[f32; 4]) {

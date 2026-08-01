@@ -14,14 +14,14 @@ pub(crate) fn dispatch_blend_row(fg: &mut [f32], bg: &[f32], mode: BlendMode) {
         BlendMode::Clear => blend_clear(fg),
         BlendMode::Src => {} // fg already contains src
         BlendMode::Dst => fg.copy_from_slice(bg),
-        BlendMode::DstOver => blend_dst_over(fg, bg),
-        BlendMode::SrcIn => blend_src_in(fg, bg),
-        BlendMode::DstIn => blend_dst_in(fg, bg),
-        BlendMode::SrcOut => blend_src_out(fg, bg),
-        BlendMode::DstOut => blend_dst_out(fg, bg),
-        BlendMode::SrcAtop => blend_src_atop(fg, bg),
-        BlendMode::DstAtop => blend_dst_atop(fg, bg),
-        BlendMode::Xor => blend_xor(fg, bg),
+        BlendMode::DstOver => crate::simd::blend_dst_over_row(fg, bg),
+        BlendMode::SrcIn => crate::simd::blend_src_in_row(fg, bg),
+        BlendMode::DstIn => crate::simd::blend_dst_in_row(fg, bg),
+        BlendMode::SrcOut => crate::simd::blend_src_out_row(fg, bg),
+        BlendMode::DstOut => crate::simd::blend_dst_out_row(fg, bg),
+        BlendMode::SrcAtop => crate::simd::blend_src_atop_row(fg, bg),
+        BlendMode::DstAtop => crate::simd::blend_dst_atop_row(fg, bg),
+        BlendMode::Xor => crate::simd::blend_xor_row(fg, bg),
         // SIMD-dispatched separable artistic modes (NEON/WASM128; scalar on x86).
         // These six reduce to a division-free polynomial in the PREMULTIPLIED
         // fg/bg, so the whole row is pure vector mul/add/min/max — a big win on
@@ -63,6 +63,14 @@ pub(crate) fn dispatch_blend_row(fg: &mut [f32], bg: &[f32], mode: BlendMode) {
         BlendMode::HardMix => blend_hard_mix(fg, bg),
         BlendMode::Divide => blend_divide(fg, bg),
         BlendMode::Subtract => simd::blend_subtract(fg, bg),
+        // Plus stays SCALAR — measured. The SIMD port of the other eight
+        // Porter-Duff modes made this one SLOWER: 590.3 ns/row originally vs
+        // 727.7 ns/row through the f32x4 kernel. Plus is `min(fg+bg, 1)` with
+        // NO alpha term, so it has no cross-lane dependency for the vector form
+        // to remove, and LLVM already autovectorizes it perfectly; the kernel
+        // only adds the two alpha splats the shared macro computes. The other
+        // eight all need an alpha broadcast, which is exactly what they gain by
+        // being vectorized.
         BlendMode::Plus => blend_plus(fg, bg),
         // non_exhaustive: future variants
         #[allow(unreachable_patterns)]
@@ -696,4 +704,65 @@ mod simd_equiv_tests {
         BlendMode::Exclusion,
         blend_exclusion
     );
+}
+
+#[cfg(test)]
+mod dst_over_simd_gate {
+    use super::*;
+
+    /// The SIMD DstOver must equal the scalar reference BIT-FOR-BIT.
+    ///
+    /// The operation is `out = bg + fg * (1 - bg_alpha)` on all four channels.
+    /// The asymmetry with SrcOver is the trap: the surviving alpha is the
+    /// BACKGROUND's, so reading `fg[3]` instead of `bg[3]` (copy-paste from the
+    /// SrcOver kernel it mirrors) would be wrong everywhere the two alphas
+    /// differ, which is most real content.
+    #[test]
+    fn dst_over_simd_matches_scalar() {
+        let mut s = 0xD00D_1E55u32;
+        for px in [0usize, 1, 2, 3, 4, 5, 7, 8, 16, 17, 64, 1000] {
+            let n = px * 4;
+            let mk = |seed: &mut u32| -> Vec<f32> {
+                (0..n)
+                    .map(|i| {
+                        *seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                        // Alpha extremes in lane 3: 0 and 1 are where DstOver
+                        // degenerates (pure fg / pure bg).
+                        if i % 4 == 3 {
+                            match (*seed >> 16) % 3 {
+                                0 => 0.0,
+                                1 => 1.0,
+                                _ => (*seed >> 8) as f32 / 16_777_216.0,
+                            }
+                        } else {
+                            (*seed >> 8) as f32 / 16_777_216.0
+                        }
+                    })
+                    .collect()
+            };
+            let fg0 = mk(&mut s);
+            let bg = mk(&mut s);
+
+            let mut got = fg0.clone();
+            crate::simd::blend_dst_over_row(&mut got, &bg);
+
+            // The original scalar reference, inlined so this cannot drift.
+            let mut want = fg0.clone();
+            for (sp, b) in want.chunks_exact_mut(4).zip(bg.chunks_exact(4)) {
+                let inv_da = 1.0 - b[3];
+                let r = b[0] + sp[0] * inv_da;
+                let g = b[1] + sp[1] * inv_da;
+                let bl = b[2] + sp[2] * inv_da;
+                let a = b[3] + sp[3] * inv_da;
+                sp[0] = r;
+                sp[1] = g;
+                sp[2] = bl;
+                sp[3] = a;
+            }
+
+            let x: Vec<u32> = got.iter().map(|v| v.to_bits()).collect();
+            let y: Vec<u32> = want.iter().map(|v| v.to_bits()).collect();
+            assert_eq!(x, y, "SIMD DstOver diverges from scalar at {px} px");
+        }
+    }
 }
