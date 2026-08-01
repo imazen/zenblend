@@ -290,6 +290,47 @@ artistic_premul_fn!(
     }
 );
 
+// ── LinearLight / PinLight: also division-free in premultiplied space ──────
+//
+// Added 2026-08-01, after the Overlay/HardLight reduction. I had claimed the
+// remaining eight straight-colour modes "do not reduce this way" as a blanket
+// structural fact. That was too broad — it was a claim about a family, made
+// without working each member. These two reduce cleanly.
+//
+// Both are min/max of affine functions, and `sa·da >= 0`, so the factor moves
+// inside: `sa·da·min(x, y) = min(sa·da·x, sa·da·y)`. With Cs = fg/sa,
+// Cd = bg/da:
+//
+//   LinearLight, Cs < 0.5:  sa·da·max(0, 2Cs+Cd-1)  -> max(0, 2·da·fg + sa·bg - sa·da)
+//   LinearLight, else:      sa·da·min(1, 2Cs-1+Cd)  -> min(sa·da, 2·da·fg - sa·da + sa·bg)
+//   PinLight,    Cs < 0.5:  sa·da·min(Cd, 2Cs)      -> min(sa·bg, 2·da·fg)
+//   PinLight,    else:      sa·da·max(Cd, 2Cs-1)    -> max(sa·bg, 2·da·fg - sa·da)
+//
+// The `Cs < 0.5` condition is `fg < 0.5·sa` in both. No division anywhere.
+artistic_premul_fn!(
+    blend_linear_light_simd,
+    |t, fg: f32x4<T>, bg: f32x4<T>, base: f32x4<T>, sa: f32, da: f32| {
+        let two = f32x4::splat(t, 2.0);
+        let sada = f32x4::splat(t, sa * da);
+        let common = two * f32x4::splat(t, da) * fg + f32x4::splat(t, sa) * bg;
+        let lo = base + (common - sada).max(f32x4::splat(t, 0.0));
+        let hi = base + (common - sada).min(sada);
+        f32x4::blend(fg.simd_lt(f32x4::splat(t, 0.5 * sa)), lo, hi)
+    }
+);
+artistic_premul_fn!(
+    blend_pin_light_simd,
+    |t, fg: f32x4<T>, bg: f32x4<T>, base: f32x4<T>, sa: f32, da: f32| {
+        let two = f32x4::splat(t, 2.0);
+        let sada = f32x4::splat(t, sa * da);
+        let sa_bg = f32x4::splat(t, sa) * bg;
+        let two_da_fg = two * f32x4::splat(t, da) * fg;
+        let lo = base + sa_bg.min(two_da_fg);
+        let hi = base + sa_bg.max(two_da_fg - sada);
+        f32x4::blend(fg.simd_lt(f32x4::splat(t, 0.5 * sa)), lo, hi)
+    }
+);
+
 // out = (1-da)fg + (1-sa)bg + fg·bg
 artistic_premul_fn!(
     blend_multiply_simd,

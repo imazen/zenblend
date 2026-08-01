@@ -58,8 +58,8 @@ pub(crate) fn dispatch_blend_row(fg: &mut [f32], bg: &[f32], mode: BlendMode) {
         BlendMode::LinearBurn => simd::blend_linear_burn(fg, bg),
         BlendMode::LinearDodge => simd::blend_linear_dodge(fg, bg),
         BlendMode::VividLight => blend_vivid_light(fg, bg),
-        BlendMode::LinearLight => blend_linear_light(fg, bg),
-        BlendMode::PinLight => blend_pin_light(fg, bg),
+        BlendMode::LinearLight => simd::blend_linear_light(fg, bg),
+        BlendMode::PinLight => simd::blend_pin_light(fg, bg),
         BlendMode::HardMix => blend_hard_mix(fg, bg),
         BlendMode::Divide => blend_divide(fg, bg),
         BlendMode::Subtract => simd::blend_subtract(fg, bg),
@@ -776,6 +776,24 @@ pub(crate) fn __overlay_unpremul_reference(fg: &mut [f32], bg: &[f32]) {
         let bp: &[f32; 4] = b.try_into().unwrap();
         blend_artistic_pixel(sp, bp, |cs, cd| {
             if cd < 0.5 { 2.0 * cs * cd } else { 1.0 - 2.0 * (1.0 - cs) * (1.0 - cd) }
+        });
+    }
+}
+
+/// Pre-2026-08-01 unpremultiplying LinearLight / PinLight, for the bench only.
+#[cfg(feature = "_dev")]
+pub(crate) fn __linear_light_unpremul_reference(fg: &mut [f32], bg: &[f32]) {
+    for (s, b) in fg.chunks_exact_mut(4).zip(bg.chunks_exact(4)) {
+        blend_artistic_pixel(s.try_into().unwrap(), b.try_into().unwrap(), |cs, cd| {
+            if cs < 0.5 { (2.0 * cs + cd - 1.0).max(0.0) } else { (2.0 * cs - 1.0 + cd).min(1.0) }
+        });
+    }
+}
+#[cfg(feature = "_dev")]
+pub(crate) fn __pin_light_unpremul_reference(fg: &mut [f32], bg: &[f32]) {
+    for (s, b) in fg.chunks_exact_mut(4).zip(bg.chunks_exact(4)) {
+        blend_artistic_pixel(s.try_into().unwrap(), b.try_into().unwrap(), |cs, cd| {
+            if cs < 0.5 { cd.min(2.0 * cs) } else { cd.max(2.0 * cs - 1.0) }
         });
     }
 }

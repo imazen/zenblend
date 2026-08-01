@@ -128,7 +128,23 @@ fn main() {
         let fg2 = fg.clone();
         let old_ns = time("Overlay unpremul (original)",
             Box::new(move |x: &mut Vec<f32>| zenblend::__bench_overlay_unpremul(black_box(x), black_box(&fg2))), &mut d);
-        println!("Overlay premul-vs-original       {:>5.2}x\n", old_ns / new_ns);
+        println!("Overlay premul-vs-original       {:>5.2}x", old_ns / new_ns);
+
+        for (label, mode, orig) in [
+            ("LinearLight", BlendMode::LinearLight,
+             zenblend::__bench_linear_light_unpremul as fn(&mut [f32], &[f32])),
+            ("PinLight", BlendMode::PinLight,
+             zenblend::__bench_pin_light_unpremul as fn(&mut [f32], &[f32])),
+        ] {
+            let f1 = fg.clone();
+            let n_ns = time(&format!("{label} premul (new)"),
+                Box::new(move |x: &mut Vec<f32>| blend_row(black_box(x), black_box(&f1), mode)), &mut d);
+            let f2 = fg.clone();
+            let o_ns = time(&format!("{label} unpremul (original)"),
+                Box::new(move |x: &mut Vec<f32>| orig(black_box(x), black_box(&f2))), &mut d);
+            println!("{label} premul-vs-original   {:>5.2}x", o_ns / n_ns);
+        }
+        println!();
     }
 
     // SrcOver is the SIMD-dispatched compositing path.

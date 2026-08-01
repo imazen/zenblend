@@ -33,6 +33,18 @@ pub fn __bench_overlay_unpremul(fg: &mut [f32], bg: &[f32]) {
     crate::blend::__overlay_unpremul_reference(fg, bg)
 }
 
+/// Dev-only originals for the other two reduced modes.
+#[cfg(feature = "_dev")]
+#[doc(hidden)]
+pub fn __bench_linear_light_unpremul(fg: &mut [f32], bg: &[f32]) {
+    crate::blend::__linear_light_unpremul_reference(fg, bg)
+}
+#[cfg(feature = "_dev")]
+#[doc(hidden)]
+pub fn __bench_pin_light_unpremul(fg: &mut [f32], bg: &[f32]) {
+    crate::blend::__pin_light_unpremul_reference(fg, bg)
+}
+
 /// Porter-Duff and artistic blend modes.
 ///
 /// Blend mode selection happens once per row (match on the enum), not per pixel.
