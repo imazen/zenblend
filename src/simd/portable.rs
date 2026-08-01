@@ -361,6 +361,23 @@ artistic_premul_fn!(
         f32x4::blend(bg.simd_le(zero), zero, r) + base
     }
 );
+// ColorBurn, same shape as ColorDodge:
+//   sa·da·(1 − min((1−Cd)/Cs, 1)) -> sa·da − min(sa²·(da−bg)/fg, sa·da)
+//   guards: Cd >= 1 (bg >= da) -> sa·da ;  Cs <= 0 (fg <= 0) -> 0
+artistic_premul_fn!(
+    blend_color_burn_simd,
+    |t, fg: f32x4<T>, bg: f32x4<T>, base: f32x4<T>, sa: f32, da: f32| {
+        let zero = f32x4::splat(t, 0.0);
+        let sada = f32x4::splat(t, sa * da);
+        let da_v = f32x4::splat(t, da);
+        let num = f32x4::splat(t, sa * sa) * (da_v - bg);
+        let term = sada - (num / fg).min(sada);
+        // Guard order matches the scalar: Cd >= 1 first, then Cs <= 0.
+        let r = f32x4::blend(fg.simd_le(zero), zero, term);
+        f32x4::blend(bg.simd_ge(da_v), sada, r) + base
+    }
+);
+
 artistic_premul_fn!(
     blend_divide_simd,
     |t, fg: f32x4<T>, bg: f32x4<T>, base: f32x4<T>, sa: f32, da: f32| {

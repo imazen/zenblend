@@ -54,7 +54,7 @@ pub(crate) fn dispatch_blend_row(fg: &mut [f32], bg: &[f32], mode: BlendMode) {
         BlendMode::HardLight => simd::blend_hard_light(fg, bg),
         BlendMode::SoftLight => blend_soft_light(fg, bg),
         BlendMode::ColorDodge => simd::blend_color_dodge(fg, bg),
-        BlendMode::ColorBurn => blend_color_burn(fg, bg),
+        BlendMode::ColorBurn => simd::blend_color_burn(fg, bg),
         BlendMode::LinearBurn => simd::blend_linear_burn(fg, bg),
         BlendMode::LinearDodge => simd::blend_linear_dodge(fg, bg),
         BlendMode::VividLight => blend_vivid_light(fg, bg),
@@ -812,6 +812,16 @@ pub(crate) fn __divide_unpremul_reference(fg: &mut [f32], bg: &[f32]) {
     for (s, b) in fg.chunks_exact_mut(4).zip(bg.chunks_exact(4)) {
         blend_artistic_pixel(s.try_into().unwrap(), b.try_into().unwrap(), |cs, cd| {
             if cs <= 0.0 { 1.0 } else { (cd / cs).min(1.0) }
+        });
+    }
+}
+
+/// Pre-2026-08-01 unpremultiplying ColorBurn, for the bench only.
+#[cfg(feature = "_dev")]
+pub(crate) fn __color_burn_unpremul_reference(fg: &mut [f32], bg: &[f32]) {
+    for (s, b) in fg.chunks_exact_mut(4).zip(bg.chunks_exact(4)) {
+        blend_artistic_pixel(s.try_into().unwrap(), b.try_into().unwrap(), |cs, cd| {
+            if cd >= 1.0 { 1.0 } else if cs <= 0.0 { 0.0 } else { 1.0 - ((1.0 - cd) / cs).min(1.0) }
         });
     }
 }
