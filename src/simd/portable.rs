@@ -378,6 +378,62 @@ artistic_premul_fn!(
     }
 );
 
+// ── VividLight / HardMix: compositions of the dodge/burn pair ──────────────
+//
+// VividLight is `Cs < 0.5 ? ColorBurn(2Cs, Cd) : ColorDodge(2Cs-1, Cd)`, so it
+// reduces by substituting 2Cs (i.e. 2·fg) into the two forms above:
+//
+//   Cs < 0.5:  sa·da - min(sa²·(da-bg)/(2·fg), sa·da)
+//   else:      min(sa²·bg/(2·(sa-fg)), sa·da)
+//
+// HardMix is `vivid < 0.5 ? 0 : 1`. The threshold is on the STRAIGHT value, but
+// it can be compared without recovering it: `f < 0.5` <-> `sa·da·f < 0.5·sa·da`,
+// and `sa·da·f` is exactly what the VividLight term already is. So HardMix costs
+// one extra compare and select over VividLight, with no extra division.
+#[inline]
+fn vivid_term<T: F32x4Backend>(
+    t: T,
+    fg: f32x4<T>,
+    bg: f32x4<T>,
+    sa: f32,
+    da: f32,
+) -> f32x4<T> {
+    let zero = f32x4::splat(t, 0.0);
+    let two = f32x4::splat(t, 2.0);
+    let sada = f32x4::splat(t, sa * da);
+    let sa_v = f32x4::splat(t, sa);
+    let da_v = f32x4::splat(t, da);
+    let sa2 = f32x4::splat(t, sa * sa);
+
+    // Cs < 0.5 branch: ColorBurn(2Cs, Cd).
+    let burn = sada - (sa2 * (da_v - bg) / (two * fg)).min(sada);
+    let burn = f32x4::blend(fg.simd_le(zero), zero, burn);
+    let burn = f32x4::blend(bg.simd_ge(da_v), sada, burn);
+
+    // Cs >= 0.5 branch: ColorDodge(2Cs-1, Cd).
+    let dodge = (sa2 * bg / (two * (sa_v - fg))).min(sada);
+    let dodge = f32x4::blend(fg.simd_ge(sa_v), sada, dodge);
+    let dodge = f32x4::blend(bg.simd_le(zero), zero, dodge);
+
+    f32x4::blend(fg.simd_lt(f32x4::splat(t, 0.5 * sa)), burn, dodge)
+}
+
+artistic_premul_fn!(
+    blend_vivid_light_simd,
+    |t, fg: f32x4<T>, bg: f32x4<T>, base: f32x4<T>, sa: f32, da: f32| {
+        base + vivid_term(t, fg, bg, sa, da)
+    }
+);
+artistic_premul_fn!(
+    blend_hard_mix_simd,
+    |t, fg: f32x4<T>, bg: f32x4<T>, base: f32x4<T>, sa: f32, da: f32| {
+        let sada = f32x4::splat(t, sa * da);
+        let v = vivid_term(t, fg, bg, sa, da);
+        // f < 0.5  <->  sa·da·f < 0.5·sa·da
+        base + f32x4::blend(v.simd_lt(f32x4::splat(t, 0.5 * sa * da)), f32x4::splat(t, 0.0), sada)
+    }
+);
+
 artistic_premul_fn!(
     blend_divide_simd,
     |t, fg: f32x4<T>, bg: f32x4<T>, base: f32x4<T>, sa: f32, da: f32| {

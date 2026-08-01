@@ -57,10 +57,10 @@ pub(crate) fn dispatch_blend_row(fg: &mut [f32], bg: &[f32], mode: BlendMode) {
         BlendMode::ColorBurn => simd::blend_color_burn(fg, bg),
         BlendMode::LinearBurn => simd::blend_linear_burn(fg, bg),
         BlendMode::LinearDodge => simd::blend_linear_dodge(fg, bg),
-        BlendMode::VividLight => blend_vivid_light(fg, bg),
+        BlendMode::VividLight => simd::blend_vivid_light(fg, bg),
         BlendMode::LinearLight => simd::blend_linear_light(fg, bg),
         BlendMode::PinLight => simd::blend_pin_light(fg, bg),
-        BlendMode::HardMix => blend_hard_mix(fg, bg),
+        BlendMode::HardMix => simd::blend_hard_mix(fg, bg),
         BlendMode::Divide => simd::blend_divide(fg, bg),
         BlendMode::Subtract => simd::blend_subtract(fg, bg),
         // Plus stays SCALAR — measured. The SIMD port of the other eight
@@ -252,15 +252,9 @@ fn dispatch_blend_pixel(fg: &mut [f32; 4], bg: &[f32; 4], mode: BlendMode) {
                 d.max(2.0 * s - 1.0)
             }
         }),
-        BlendMode::HardMix => {
-            blend_artistic_pixel(
-                fg,
-                bg,
-                |s, d| {
-                    if vivid_light_fn(s, d) < 0.5 { 0.0 } else { 1.0 }
-                },
-            )
-        }
+        BlendMode::HardMix => blend_artistic_pixel(fg, bg, |s, d| {
+            if vivid_light_fn(s, d) < 0.5 { 0.0 } else { 1.0 }
+        }),
         BlendMode::Divide => blend_artistic_pixel(fg, bg, |s, d| {
             if s <= 0.0 {
                 1.0 // d / 0 → 1.0 (clamped)
@@ -822,6 +816,22 @@ pub(crate) fn __color_burn_unpremul_reference(fg: &mut [f32], bg: &[f32]) {
     for (s, b) in fg.chunks_exact_mut(4).zip(bg.chunks_exact(4)) {
         blend_artistic_pixel(s.try_into().unwrap(), b.try_into().unwrap(), |cs, cd| {
             if cd >= 1.0 { 1.0 } else if cs <= 0.0 { 0.0 } else { 1.0 - ((1.0 - cd) / cs).min(1.0) }
+        });
+    }
+}
+
+/// Pre-2026-08-01 unpremultiplying VividLight / HardMix, for the bench only.
+#[cfg(feature = "_dev")]
+pub(crate) fn __vivid_light_unpremul_reference(fg: &mut [f32], bg: &[f32]) {
+    for (s, b) in fg.chunks_exact_mut(4).zip(bg.chunks_exact(4)) {
+        blend_artistic_pixel(s.try_into().unwrap(), b.try_into().unwrap(), vivid_light_fn);
+    }
+}
+#[cfg(feature = "_dev")]
+pub(crate) fn __hard_mix_unpremul_reference(fg: &mut [f32], bg: &[f32]) {
+    for (s, b) in fg.chunks_exact_mut(4).zip(bg.chunks_exact(4)) {
+        blend_artistic_pixel(s.try_into().unwrap(), b.try_into().unwrap(), |cs, cd| {
+            if vivid_light_fn(cs, cd) < 0.5 { 0.0 } else { 1.0 }
         });
     }
 }

@@ -149,6 +149,20 @@ artistic_kernel!(
     blend_color_burn_simd
 );
 artistic_kernel!(
+    blend_vivid_light,
+    blend_vivid_light_scalar,
+    blend_vivid_light_neon,
+    blend_vivid_light_wasm128,
+    blend_vivid_light_simd
+);
+artistic_kernel!(
+    blend_hard_mix,
+    blend_hard_mix_scalar,
+    blend_hard_mix_neon,
+    blend_hard_mix_wasm128,
+    blend_hard_mix_simd
+);
+artistic_kernel!(
     blend_screen,
     blend_screen_scalar,
     blend_screen_neon,
@@ -273,6 +287,8 @@ mod _neon_wrappers {
     artistic_neon!(blend_multiply_neon, blend_multiply_simd);
     artistic_neon!(blend_linear_light_neon, blend_linear_light_simd);
     artistic_neon!(blend_pin_light_neon, blend_pin_light_simd);
+    artistic_neon!(blend_vivid_light_neon, blend_vivid_light_simd);
+    artistic_neon!(blend_hard_mix_neon, blend_hard_mix_simd);
     artistic_neon!(blend_color_burn_neon, blend_color_burn_simd);
     artistic_neon!(blend_color_dodge_neon, blend_color_dodge_simd);
     artistic_neon!(blend_divide_neon, blend_divide_simd);
@@ -361,6 +377,8 @@ mod _wasm_wrappers {
     artistic_wasm!(blend_multiply_wasm128, blend_multiply_simd);
     artistic_wasm!(blend_linear_light_wasm128, blend_linear_light_simd);
     artistic_wasm!(blend_pin_light_wasm128, blend_pin_light_simd);
+    artistic_wasm!(blend_vivid_light_wasm128, blend_vivid_light_simd);
+    artistic_wasm!(blend_hard_mix_wasm128, blend_hard_mix_simd);
     artistic_wasm!(blend_color_burn_wasm128, blend_color_burn_simd);
     artistic_wasm!(blend_color_dodge_wasm128, blend_color_dodge_simd);
     artistic_wasm!(blend_divide_wasm128, blend_divide_simd);
