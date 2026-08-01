@@ -145,6 +145,8 @@ fn main() {
              zenblend::__bench_vivid_light_unpremul as fn(&mut [f32], &[f32])),
             ("HardMix", BlendMode::HardMix,
              zenblend::__bench_hard_mix_unpremul as fn(&mut [f32], &[f32])),
+            ("SoftLight", BlendMode::SoftLight,
+             zenblend::__bench_soft_light_unpremul as fn(&mut [f32], &[f32])),
         ] {
             let f1 = fg.clone();
             let n_ns = time(&format!("{label} premul (new)"),

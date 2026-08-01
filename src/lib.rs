@@ -69,6 +69,11 @@ pub fn __bench_vivid_light_unpremul(fg: &mut [f32], bg: &[f32]) {
 pub fn __bench_hard_mix_unpremul(fg: &mut [f32], bg: &[f32]) {
     crate::blend::__hard_mix_unpremul_reference(fg, bg)
 }
+#[cfg(feature = "_dev")]
+#[doc(hidden)]
+pub fn __bench_soft_light_unpremul(fg: &mut [f32], bg: &[f32]) {
+    crate::blend::__soft_light_unpremul_reference(fg, bg)
+}
 
 /// Porter-Duff and artistic blend modes.
 ///

@@ -272,6 +272,14 @@ fn overlay_hardlight_premul_matches_unpremul_reference() {
         }
     };
     let hard_mix = move |cs: f32, cd: f32| -> f32 { if vivid(cs, cd) < 0.5 { 0.0 } else { 1.0 } };
+    let soft_light = |cs: f32, cd: f32| -> f32 {
+        if cs <= 0.5 {
+            cd - (1.0 - 2.0 * cs) * cd * (1.0 - cd)
+        } else {
+            let g = if cd <= 0.25 { ((16.0 * cd - 12.0) * cd + 4.0) * cd } else { cd.sqrt() };
+            cd + (2.0 * cs - 1.0) * (g - cd)
+        }
+    };
     let pin_light = |cs: f32, cd: f32| {
         if cs < 0.5 { cd.min(2.0 * cs) } else { cd.max(2.0 * cs - 1.0) }
     };
@@ -285,6 +293,7 @@ fn overlay_hardlight_premul_matches_unpremul_reference() {
         ("ColorBurn", BlendMode::ColorBurn, &color_burn as &dyn Fn(f32, f32) -> f32),
         ("VividLight", BlendMode::VividLight, &vivid as &dyn Fn(f32, f32) -> f32),
         ("HardMix", BlendMode::HardMix, &hard_mix as &dyn Fn(f32, f32) -> f32),
+        ("SoftLight", BlendMode::SoftLight, &soft_light as &dyn Fn(f32, f32) -> f32),
     ] {
         let fg0 = mk(&mut s);
         let bg = mk(&mut s);

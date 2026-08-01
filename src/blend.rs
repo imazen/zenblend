@@ -52,7 +52,7 @@ pub(crate) fn dispatch_blend_row(fg: &mut [f32], bg: &[f32], mode: BlendMode) {
         // remove the unpremultiply entirely rather than vectorizing around it.
         BlendMode::Overlay => simd::blend_overlay(fg, bg),
         BlendMode::HardLight => simd::blend_hard_light(fg, bg),
-        BlendMode::SoftLight => blend_soft_light(fg, bg),
+        BlendMode::SoftLight => simd::blend_soft_light(fg, bg),
         BlendMode::ColorDodge => simd::blend_color_dodge(fg, bg),
         BlendMode::ColorBurn => simd::blend_color_burn(fg, bg),
         BlendMode::LinearBurn => simd::blend_linear_burn(fg, bg),
@@ -832,6 +832,21 @@ pub(crate) fn __hard_mix_unpremul_reference(fg: &mut [f32], bg: &[f32]) {
     for (s, b) in fg.chunks_exact_mut(4).zip(bg.chunks_exact(4)) {
         blend_artistic_pixel(s.try_into().unwrap(), b.try_into().unwrap(), |cs, cd| {
             if vivid_light_fn(cs, cd) < 0.5 { 0.0 } else { 1.0 }
+        });
+    }
+}
+
+/// Pre-2026-08-01 unpremultiplying SoftLight, for the bench only.
+#[cfg(feature = "_dev")]
+pub(crate) fn __soft_light_unpremul_reference(fg: &mut [f32], bg: &[f32]) {
+    for (s, b) in fg.chunks_exact_mut(4).zip(bg.chunks_exact(4)) {
+        blend_artistic_pixel(s.try_into().unwrap(), b.try_into().unwrap(), |cs, cd| {
+            if cs <= 0.5 {
+                cd - (1.0 - 2.0 * cs) * cd * (1.0 - cd)
+            } else {
+                let g = if cd <= 0.25 { ((16.0 * cd - 12.0) * cd + 4.0) * cd } else { cd.sqrt() };
+                cd + (2.0 * cs - 1.0) * (g - cd)
+            }
         });
     }
 }
