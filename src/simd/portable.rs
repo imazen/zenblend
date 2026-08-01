@@ -248,6 +248,48 @@ macro_rules! artistic_premul_fn {
     };
 }
 
+// ── Overlay / HardLight: division-free premultiplied closed forms ──────────
+//
+// Added 2026-08-01. These two were previously in the "needs straight colour"
+// group, where three hand-written decompositions were built and all LOST (see
+// the note on `artistic_premul_simd`). Every one of those attempts kept the
+// unpremultiply and tried to make it cheaper. That was the wrong target: the
+// unpremultiply is not NEEDED here.
+//
+// Overlay is `Cd < 0.5 ? Multiply : Screen`, and BOTH of those already have
+// division-free premultiplied forms in this file. Carrying the branch through
+// the same algebra (Cs = fg/sa, Cd = bg/da):
+//
+//   condition  Cd < 0.5              <->  bg < 0.5·da
+//   branch 1   sa·da·(2·Cs·Cd)       ->   2·fg·bg
+//   branch 2   sa·da·(1−2(1−Cs)(1−Cd)) -> sa·da − 2(sa−fg)(da−bg)
+//
+// because sa(1−Cs) = sa−fg and da(1−Cd) = da−bg. No division survives, and the
+// branch becomes a vector select on premultiplied values.
+//
+// HardLight is Overlay with the roles swapped (`Cs < 0.5`), so its condition is
+// `fg < 0.5·sa` over the identical two branches.
+artistic_premul_fn!(
+    blend_overlay_simd,
+    |t, fg: f32x4<T>, bg: f32x4<T>, base: f32x4<T>, sa: f32, da: f32| {
+        let two = f32x4::splat(t, 2.0);
+        let lo = base + two * fg * bg;
+        let hi = base + f32x4::splat(t, sa * da)
+            - two * (f32x4::splat(t, sa) - fg) * (f32x4::splat(t, da) - bg);
+        f32x4::blend(bg.simd_lt(f32x4::splat(t, 0.5 * da)), lo, hi)
+    }
+);
+artistic_premul_fn!(
+    blend_hard_light_simd,
+    |t, fg: f32x4<T>, bg: f32x4<T>, base: f32x4<T>, sa: f32, da: f32| {
+        let two = f32x4::splat(t, 2.0);
+        let lo = base + two * fg * bg;
+        let hi = base + f32x4::splat(t, sa * da)
+            - two * (f32x4::splat(t, sa) - fg) * (f32x4::splat(t, da) - bg);
+        f32x4::blend(fg.simd_lt(f32x4::splat(t, 0.5 * sa)), lo, hi)
+    }
+);
+
 // out = (1-da)fg + (1-sa)bg + fg·bg
 artistic_premul_fn!(
     blend_multiply_simd,

@@ -106,6 +106,31 @@ fn main() {
 
     println!("=== zenblend SIMD tier isolation, {WIDTH}px RGBA rows, {iters} iters ===");
 
+    // The premultiplied Overlay against the ORIGINAL unpremultiplying one, in
+    // the SAME process. The tier arm above compares premul-vector against
+    // premul-1-lane, which does not answer "is this faster than what shipped",
+    // and cross-run absolutes drift up to 2x on this host so a before/after
+    // from two separate runs proves nothing.
+    {
+        set_simd(true);
+        let mut d = bg.clone();
+        let time = |label: &str, mut f: Box<dyn FnMut(&mut Vec<f32>)>, d: &mut Vec<f32>| -> f64 {
+            for _ in 0..(iters / 10).max(1) { d.copy_from_slice(&bg); f(d); }
+            let start = Instant::now();
+            for _ in 0..iters { d.copy_from_slice(&bg); f(d); }
+            let ns = start.elapsed().as_nanos() as f64 / iters as f64;
+            println!("{label:<32} {ns:>8.1} ns/row");
+            ns
+        };
+        let fg1 = fg.clone();
+        let new_ns = time("Overlay premul (new)",
+            Box::new(move |x: &mut Vec<f32>| blend_row(black_box(x), black_box(&fg1), BlendMode::Overlay)), &mut d);
+        let fg2 = fg.clone();
+        let old_ns = time("Overlay unpremul (original)",
+            Box::new(move |x: &mut Vec<f32>| zenblend::__bench_overlay_unpremul(black_box(x), black_box(&fg2))), &mut d);
+        println!("Overlay premul-vs-original       {:>5.2}x\n", old_ns / new_ns);
+    }
+
     // SrcOver is the SIMD-dispatched compositing path.
     let mut dst = bg.clone();
     ab("blend_row/SrcOver", iters, || {

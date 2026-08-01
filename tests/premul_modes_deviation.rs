@@ -194,3 +194,78 @@ fn premul_modes_degenerate_alpha() {
         assert!(fg[7] > 0.0, "{mode:?}: opaque pixel must survive");
     }
 }
+
+/// Overlay and HardLight moved to division-free PREMULTIPLIED closed forms on
+/// 2026-08-01. This checks that algebra against the ORIGINAL unpremultiplying
+/// reference, which is the only thing that can catch it being wrong.
+///
+/// Neither existing test would: `simd_consistency` compares token permutations
+/// against each other (all tiers would be consistently wrong), and the other
+/// cases here cover different modes. The derivation being validated is
+///
+///   condition  Cd < 0.5                 <->  bg < 0.5*da
+///   branch 1   sa*da*(2*Cs*Cd)          ->   2*fg*bg
+///   branch 2   sa*da*(1-2(1-Cs)(1-Cd))  ->   sa*da - 2(sa-fg)(da-bg)
+///
+/// so an error in either branch, or in the translated comparison, shows up here
+/// as a deviation far larger than f32 rounding.
+#[test]
+fn overlay_hardlight_premul_matches_unpremul_reference() {
+    fn reference(fg: &mut [f32], bg: &[f32], f: impl Fn(f32, f32) -> f32) {
+        for (s, b) in fg.chunks_exact_mut(4).zip(bg.chunks_exact(4)) {
+            let (sa, da) = (s[3], b[3]);
+            let out_a = sa + da - sa * da;
+            if !out_a.is_finite() || out_a <= 0.0 {
+                s.copy_from_slice(&[0.0; 4]);
+                continue;
+            }
+            let inv_sa = if sa > 0.0 { 1.0 / sa } else { 0.0 };
+            let inv_da = if da > 0.0 { 1.0 / da } else { 0.0 };
+            for i in 0..3 {
+                let out = (1.0 - da) * s[i]
+                    + (1.0 - sa) * b[i]
+                    + sa * da * f(s[i] * inv_sa, b[i] * inv_da);
+                s[i] = if out.is_finite() { out } else { 0.0 };
+            }
+            s[3] = out_a;
+        }
+    }
+    let overlay = |cs: f32, cd: f32| {
+        if cd < 0.5 { 2.0 * cs * cd } else { 1.0 - 2.0 * (1.0 - cs) * (1.0 - cd) }
+    };
+    let hard_light = |cs: f32, cd: f32| {
+        if cs < 0.5 { 2.0 * cs * cd } else { 1.0 - 2.0 * (1.0 - cs) * (1.0 - cd) }
+    };
+
+    // Sweep alphas AND colours across the Cd = 0.5 / Cs = 0.5 branch boundary,
+    // which is where a mistranslated comparison would show.
+    let mut s = 0x00A5_5A00u32;
+    let n = 4096;
+    let mk = |seed: &mut u32| -> Vec<f32> {
+        (0..n * 4)
+            .map(|i| {
+                *seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                let r = (*seed >> 8) as f32 / 16_777_216.0;
+                if i % 4 == 3 { r } else { r }
+            })
+            .collect()
+    };
+    for (name, mode, f) in [
+        ("Overlay", BlendMode::Overlay, &overlay as &dyn Fn(f32, f32) -> f32),
+        ("HardLight", BlendMode::HardLight, &hard_light as &dyn Fn(f32, f32) -> f32),
+    ] {
+        let fg0 = mk(&mut s);
+        let bg = mk(&mut s);
+        let mut got = fg0.clone();
+        blend_row(&mut got, &bg, mode);
+        let mut want = fg0.clone();
+        reference(&mut want, &bg, f);
+        let dev = got
+            .iter()
+            .zip(want.iter())
+            .map(|(g, w)| (g - w).abs())
+            .fold(0.0f32, f32::max);
+        println!("{name:12} premul-vs-unpremul max deviation {dev:e}");
+        assert!(dev <= 5e-4, "{name}: premultiplied form deviates {dev:e} from the reference");
+    }
+}

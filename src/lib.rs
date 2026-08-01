@@ -23,6 +23,16 @@ mod blend;
 pub mod mask;
 mod simd;
 
+/// Dev-only: the ORIGINAL unpremultiplying Overlay, kept reachable so
+/// `benches/tier_isolation.rs` can measure the new premultiplied form against
+/// what actually shipped before — the tier arm compares against the premul
+/// form at 1 lane, which is a different question.
+#[cfg(feature = "_dev")]
+#[doc(hidden)]
+pub fn __bench_overlay_unpremul(fg: &mut [f32], bg: &[f32]) {
+    crate::blend::__overlay_unpremul_reference(fg, bg)
+}
+
 /// Porter-Duff and artistic blend modes.
 ///
 /// Blend mode selection happens once per row (match on the enum), not per pixel.

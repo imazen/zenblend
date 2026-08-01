@@ -50,8 +50,8 @@ pub(crate) fn dispatch_blend_row(fg: &mut [f32], bg: &[f32], mode: BlendMode) {
         //
         // The division-free modes below are the opposite case and DID win: they
         // remove the unpremultiply entirely rather than vectorizing around it.
-        BlendMode::Overlay => blend_overlay(fg, bg),
-        BlendMode::HardLight => blend_hard_light(fg, bg),
+        BlendMode::Overlay => simd::blend_overlay(fg, bg),
+        BlendMode::HardLight => simd::blend_hard_light(fg, bg),
         BlendMode::SoftLight => blend_soft_light(fg, bg),
         BlendMode::ColorDodge => blend_color_dodge(fg, bg),
         BlendMode::ColorBurn => blend_color_burn(fg, bg),
@@ -764,5 +764,18 @@ mod dst_over_simd_gate {
             let y: Vec<u32> = want.iter().map(|v| v.to_bits()).collect();
             assert_eq!(x, y, "SIMD DstOver diverges from scalar at {px} px");
         }
+    }
+}
+
+/// The pre-2026-08-01 unpremultiplying Overlay, retained ONLY so the bench can
+/// measure the premultiplied replacement against what actually shipped before.
+#[cfg(feature = "_dev")]
+pub(crate) fn __overlay_unpremul_reference(fg: &mut [f32], bg: &[f32]) {
+    for (s, b) in fg.chunks_exact_mut(4).zip(bg.chunks_exact(4)) {
+        let sp: &mut [f32; 4] = s.try_into().unwrap();
+        let bp: &[f32; 4] = b.try_into().unwrap();
+        blend_artistic_pixel(sp, bp, |cs, cd| {
+            if cd < 0.5 { 2.0 * cs * cd } else { 1.0 - 2.0 * (1.0 - cs) * (1.0 - cd) }
+        });
     }
 }
