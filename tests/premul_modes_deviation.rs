@@ -253,6 +253,12 @@ fn overlay_hardlight_premul_matches_unpremul_reference() {
     let linear_light = |cs: f32, cd: f32| {
         if cs < 0.5 { (2.0 * cs + cd - 1.0).max(0.0) } else { (2.0 * cs - 1.0 + cd).min(1.0) }
     };
+    let color_dodge = |cs: f32, cd: f32| {
+        if cd <= 0.0 { 0.0 } else if cs >= 1.0 { 1.0 } else { (cd / (1.0 - cs)).min(1.0) }
+    };
+    let divide = |cs: f32, cd: f32| {
+        if cs <= 0.0 { 1.0 } else { (cd / cs).min(1.0) }
+    };
     let pin_light = |cs: f32, cd: f32| {
         if cs < 0.5 { cd.min(2.0 * cs) } else { cd.max(2.0 * cs - 1.0) }
     };
@@ -261,6 +267,8 @@ fn overlay_hardlight_premul_matches_unpremul_reference() {
         ("HardLight", BlendMode::HardLight, &hard_light as &dyn Fn(f32, f32) -> f32),
         ("LinearLight", BlendMode::LinearLight, &linear_light as &dyn Fn(f32, f32) -> f32),
         ("PinLight", BlendMode::PinLight, &pin_light as &dyn Fn(f32, f32) -> f32),
+        ("ColorDodge", BlendMode::ColorDodge, &color_dodge as &dyn Fn(f32, f32) -> f32),
+        ("Divide", BlendMode::Divide, &divide as &dyn Fn(f32, f32) -> f32),
     ] {
         let fg0 = mk(&mut s);
         let bg = mk(&mut s);

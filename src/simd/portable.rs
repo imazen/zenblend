@@ -331,6 +331,47 @@ artistic_premul_fn!(
     }
 );
 
+// ── ColorDodge / Divide: ONE vector divide instead of ~5 scalar ones ───────
+//
+// These do not go division-free — Cd/(1-Cs) has a genuine reciprocal. But the
+// scalar path pays ~5 divides PER PIXEL (inv_sa, inv_da, then one per channel
+// inside f), whereas the premultiplied form needs exactly ONE vector divide per
+// pixel, which `vdivq_f32` does in a single instruction across 4 lanes.
+//
+//   ColorDodge  sa·da·min(Cd/(1-Cs), 1) -> min(sa²·bg/(sa-fg), sa·da)
+//               Cd <= 0  -> 0            (i.e. bg <= 0)
+//               Cs >= 1  -> sa·da        (i.e. fg >= sa)
+//   Divide      sa·da·min(Cd/Cs, 1)     -> min(sa²·bg/fg, sa·da)
+//               Cs <= 0  -> sa·da        (i.e. fg <= 0)
+//
+// The divide runs on every lane including the guarded ones — SIMD has no
+// branches — so it can produce inf/NaN there. That is harmless because the
+// guard is a `blend` that SELECTS a lane rather than multiplying by it, so the
+// poisoned value is discarded rather than propagated.
+artistic_premul_fn!(
+    blend_color_dodge_simd,
+    |t, fg: f32x4<T>, bg: f32x4<T>, base: f32x4<T>, sa: f32, da: f32| {
+        let zero = f32x4::splat(t, 0.0);
+        let sada = f32x4::splat(t, sa * da);
+        let sa_v = f32x4::splat(t, sa);
+        let num = f32x4::splat(t, sa * sa) * bg;
+        let quot = (num / (sa_v - fg)).min(sada);
+        // Cs >= 1 first, then Cd <= 0 — matching the scalar's guard order.
+        let r = f32x4::blend(fg.simd_ge(sa_v), sada, quot);
+        f32x4::blend(bg.simd_le(zero), zero, r) + base
+    }
+);
+artistic_premul_fn!(
+    blend_divide_simd,
+    |t, fg: f32x4<T>, bg: f32x4<T>, base: f32x4<T>, sa: f32, da: f32| {
+        let zero = f32x4::splat(t, 0.0);
+        let sada = f32x4::splat(t, sa * da);
+        let num = f32x4::splat(t, sa * sa) * bg;
+        let quot = (num / fg).min(sada);
+        f32x4::blend(fg.simd_le(zero), sada, quot) + base
+    }
+);
+
 // out = (1-da)fg + (1-sa)bg + fg·bg
 artistic_premul_fn!(
     blend_multiply_simd,

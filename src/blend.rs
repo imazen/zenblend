@@ -53,7 +53,7 @@ pub(crate) fn dispatch_blend_row(fg: &mut [f32], bg: &[f32], mode: BlendMode) {
         BlendMode::Overlay => simd::blend_overlay(fg, bg),
         BlendMode::HardLight => simd::blend_hard_light(fg, bg),
         BlendMode::SoftLight => blend_soft_light(fg, bg),
-        BlendMode::ColorDodge => blend_color_dodge(fg, bg),
+        BlendMode::ColorDodge => simd::blend_color_dodge(fg, bg),
         BlendMode::ColorBurn => blend_color_burn(fg, bg),
         BlendMode::LinearBurn => simd::blend_linear_burn(fg, bg),
         BlendMode::LinearDodge => simd::blend_linear_dodge(fg, bg),
@@ -61,7 +61,7 @@ pub(crate) fn dispatch_blend_row(fg: &mut [f32], bg: &[f32], mode: BlendMode) {
         BlendMode::LinearLight => simd::blend_linear_light(fg, bg),
         BlendMode::PinLight => simd::blend_pin_light(fg, bg),
         BlendMode::HardMix => blend_hard_mix(fg, bg),
-        BlendMode::Divide => blend_divide(fg, bg),
+        BlendMode::Divide => simd::blend_divide(fg, bg),
         BlendMode::Subtract => simd::blend_subtract(fg, bg),
         // Plus stays SCALAR — measured. The SIMD port of the other eight
         // Porter-Duff modes made this one SLOWER: 590.3 ns/row originally vs
@@ -794,6 +794,24 @@ pub(crate) fn __pin_light_unpremul_reference(fg: &mut [f32], bg: &[f32]) {
     for (s, b) in fg.chunks_exact_mut(4).zip(bg.chunks_exact(4)) {
         blend_artistic_pixel(s.try_into().unwrap(), b.try_into().unwrap(), |cs, cd| {
             if cs < 0.5 { cd.min(2.0 * cs) } else { cd.max(2.0 * cs - 1.0) }
+        });
+    }
+}
+
+/// Pre-2026-08-01 unpremultiplying ColorDodge / Divide, for the bench only.
+#[cfg(feature = "_dev")]
+pub(crate) fn __color_dodge_unpremul_reference(fg: &mut [f32], bg: &[f32]) {
+    for (s, b) in fg.chunks_exact_mut(4).zip(bg.chunks_exact(4)) {
+        blend_artistic_pixel(s.try_into().unwrap(), b.try_into().unwrap(), |cs, cd| {
+            if cd <= 0.0 { 0.0 } else if cs >= 1.0 { 1.0 } else { (cd / (1.0 - cs)).min(1.0) }
+        });
+    }
+}
+#[cfg(feature = "_dev")]
+pub(crate) fn __divide_unpremul_reference(fg: &mut [f32], bg: &[f32]) {
+    for (s, b) in fg.chunks_exact_mut(4).zip(bg.chunks_exact(4)) {
+        blend_artistic_pixel(s.try_into().unwrap(), b.try_into().unwrap(), |cs, cd| {
+            if cs <= 0.0 { 1.0 } else { (cd / cs).min(1.0) }
         });
     }
 }

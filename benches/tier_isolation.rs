@@ -135,6 +135,10 @@ fn main() {
              zenblend::__bench_linear_light_unpremul as fn(&mut [f32], &[f32])),
             ("PinLight", BlendMode::PinLight,
              zenblend::__bench_pin_light_unpremul as fn(&mut [f32], &[f32])),
+            ("ColorDodge", BlendMode::ColorDodge,
+             zenblend::__bench_color_dodge_unpremul as fn(&mut [f32], &[f32])),
+            ("Divide", BlendMode::Divide,
+             zenblend::__bench_divide_unpremul as fn(&mut [f32], &[f32])),
         ] {
             let f1 = fg.clone();
             let n_ns = time(&format!("{label} premul (new)"),

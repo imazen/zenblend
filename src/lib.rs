@@ -44,6 +44,16 @@ pub fn __bench_linear_light_unpremul(fg: &mut [f32], bg: &[f32]) {
 pub fn __bench_pin_light_unpremul(fg: &mut [f32], bg: &[f32]) {
     crate::blend::__pin_light_unpremul_reference(fg, bg)
 }
+#[cfg(feature = "_dev")]
+#[doc(hidden)]
+pub fn __bench_color_dodge_unpremul(fg: &mut [f32], bg: &[f32]) {
+    crate::blend::__color_dodge_unpremul_reference(fg, bg)
+}
+#[cfg(feature = "_dev")]
+#[doc(hidden)]
+pub fn __bench_divide_unpremul(fg: &mut [f32], bg: &[f32]) {
+    crate::blend::__divide_unpremul_reference(fg, bg)
+}
 
 /// Porter-Duff and artistic blend modes.
 ///
