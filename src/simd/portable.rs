@@ -111,6 +111,14 @@ pub(super) fn mask_row_rgb_apply<T: F32x4Backend>(token: T, fg: &mut [f32], mask
 /// Premultiplied closed-form kernel: `combine(token, fg_v, bg_v, base, sa, da)`
 /// returns the RGB output vector (lane 3 discarded, overwritten with out_a).
 /// `base = (1-da)·fg + (1-sa)·bg` is precomputed (shared by several modes).
+///
+/// The 18 modes that need STRAIGHT colour do not get a hand-written kernel, and
+/// that is a measured decision rather than an omission — on aarch64 NEON is
+/// baseline, so the portable path is already vectorized (the tier bench reports
+/// 1.00x neon-vs-forced-scalar for them). Three different hand-written
+/// decompositions were built and benchmarked; all three lost. Numbers and the
+/// reason each failed: `benchmarks/neon_unpremul_attempts_2026-07-31.md`. Read
+/// that before attempting a fourth.
 #[inline]
 fn artistic_premul_simd<T, F>(token: T, fg: &mut [f32], bg: &[f32], combine: F)
 where
