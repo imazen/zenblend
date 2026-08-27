@@ -86,6 +86,9 @@ fn rows(n: usize, seed: u64, tiny_alpha: bool) -> (Vec<f32>, Vec<f32>) {
     (fg, bg)
 }
 
+/// (label, mode, separable blend function on unpremultiplied channels).
+type Case = (&'static str, BlendMode, fn(f32, f32) -> f32);
+
 fn max_dev(mode: BlendMode, f: impl Fn(f32, f32) -> f32, tiny_alpha: bool) -> f32 {
     let (fg, bg) = rows(4096, 0xC0FFEE ^ (mode as u64).wrapping_mul(31), tiny_alpha);
 
@@ -93,11 +96,13 @@ fn max_dev(mode: BlendMode, f: impl Fn(f32, f32) -> f32, tiny_alpha: bool) -> f3
     blend_row(&mut got, &bg, mode);
 
     let mut want = fg.clone();
-    for (p, q) in want.chunks_exact_mut(4).zip(bg.chunks_exact(4)) {
-        let mut px: [f32; 4] = p.try_into().unwrap();
-        let bx: [f32; 4] = q.try_into().unwrap();
-        reference_pixel(&mut px, &bx, &f);
-        p.copy_from_slice(&px);
+    for (p, q) in want
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(bg.as_chunks::<4>().0)
+    {
+        reference_pixel(p, q, &f);
     }
 
     got.iter()
@@ -111,8 +116,10 @@ fn premul_modes_match_reference_to_rounding() {
     // Channel values live in [0, 1]; 1e-6 is ~8 ULP there, comfortably above
     // reordering noise and far below anything visible at 8 or even 16 bits.
     const BOUND: f32 = 1e-6;
-    let cases: Vec<(&str, BlendMode, fn(f32, f32) -> f32)> = vec![
-        ("LinearDodge", BlendMode::LinearDodge, |s, d| (s + d).min(1.0)),
+    let cases: Vec<Case> = vec![
+        ("LinearDodge", BlendMode::LinearDodge, |s, d| {
+            (s + d).min(1.0)
+        }),
         ("LinearBurn", BlendMode::LinearBurn, |s, d| {
             (s + d - 1.0).max(0.0)
         }),
@@ -148,8 +155,10 @@ fn premul_modes_opaque_pixels_agree_tightly() {
             out.push(1.0);
         }
     }
-    let cases: Vec<(&str, BlendMode, fn(f32, f32) -> f32)> = vec![
-        ("LinearDodge", BlendMode::LinearDodge, |s, d| (s + d).min(1.0)),
+    let cases: Vec<Case> = vec![
+        ("LinearDodge", BlendMode::LinearDodge, |s, d| {
+            (s + d).min(1.0)
+        }),
         ("LinearBurn", BlendMode::LinearBurn, |s, d| {
             (s + d - 1.0).max(0.0)
         }),
@@ -159,11 +168,13 @@ fn premul_modes_opaque_pixels_agree_tightly() {
         let mut got = fg.clone();
         blend_row(&mut got, &bg, mode);
         let mut want = fg.clone();
-        for (p, q) in want.chunks_exact_mut(4).zip(bg.chunks_exact(4)) {
-            let mut px: [f32; 4] = p.try_into().unwrap();
-            let bx: [f32; 4] = q.try_into().unwrap();
-            reference_pixel(&mut px, &bx, &f);
-            p.copy_from_slice(&px);
+        for (p, q) in want
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
+            .zip(bg.as_chunks::<4>().0)
+        {
+            reference_pixel(p, q, f);
         }
         let dev = got
             .iter()
@@ -212,7 +223,12 @@ fn premul_modes_degenerate_alpha() {
 #[test]
 fn overlay_hardlight_premul_matches_unpremul_reference() {
     fn reference(fg: &mut [f32], bg: &[f32], f: impl Fn(f32, f32) -> f32) {
-        for (s, b) in fg.chunks_exact_mut(4).zip(bg.chunks_exact(4)) {
+        for (s, b) in fg
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
+            .zip(bg.as_chunks::<4>().0)
+        {
             let (sa, da) = (s[3], b[3]);
             let out_a = sa + da - sa * da;
             if !out_a.is_finite() || out_a <= 0.0 {
@@ -231,10 +247,18 @@ fn overlay_hardlight_premul_matches_unpremul_reference() {
         }
     }
     let overlay = |cs: f32, cd: f32| {
-        if cd < 0.5 { 2.0 * cs * cd } else { 1.0 - 2.0 * (1.0 - cs) * (1.0 - cd) }
+        if cd < 0.5 {
+            2.0 * cs * cd
+        } else {
+            1.0 - 2.0 * (1.0 - cs) * (1.0 - cd)
+        }
     };
     let hard_light = |cs: f32, cd: f32| {
-        if cs < 0.5 { 2.0 * cs * cd } else { 1.0 - 2.0 * (1.0 - cs) * (1.0 - cd) }
+        if cs < 0.5 {
+            2.0 * cs * cd
+        } else {
+            1.0 - 2.0 * (1.0 - cs) * (1.0 - cd)
+        }
     };
 
     // Sweep alphas AND colours across the Cd = 0.5 / Cs = 0.5 branch boundary,
@@ -243,32 +267,61 @@ fn overlay_hardlight_premul_matches_unpremul_reference() {
     let n = 4096;
     let mk = |seed: &mut u32| -> Vec<f32> {
         (0..n * 4)
-            .map(|i| {
+            .map(|_| {
                 *seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-                let r = (*seed >> 8) as f32 / 16_777_216.0;
-                if i % 4 == 3 { r } else { r }
+                // Alpha lanes deliberately share the colour distribution: the
+                // sweep wants every alpha, not just the 0 / 1 extremes.
+                (*seed >> 8) as f32 / 16_777_216.0
             })
             .collect()
     };
     let linear_light = |cs: f32, cd: f32| {
-        if cs < 0.5 { (2.0 * cs + cd - 1.0).max(0.0) } else { (2.0 * cs - 1.0 + cd).min(1.0) }
+        if cs < 0.5 {
+            (2.0 * cs + cd - 1.0).max(0.0)
+        } else {
+            (2.0 * cs - 1.0 + cd).min(1.0)
+        }
     };
     let color_dodge = |cs: f32, cd: f32| {
-        if cd <= 0.0 { 0.0 } else if cs >= 1.0 { 1.0 } else { (cd / (1.0 - cs)).min(1.0) }
+        if cd <= 0.0 {
+            0.0
+        } else if cs >= 1.0 {
+            1.0
+        } else {
+            (cd / (1.0 - cs)).min(1.0)
+        }
     };
     let divide = |cs: f32, cd: f32| {
         if cs <= 0.0 { 1.0 } else { (cd / cs).min(1.0) }
     };
     let color_burn = |cs: f32, cd: f32| {
-        if cd >= 1.0 { 1.0 } else if cs <= 0.0 { 0.0 } else { 1.0 - ((1.0 - cd) / cs).min(1.0) }
+        if cd >= 1.0 {
+            1.0
+        } else if cs <= 0.0 {
+            0.0
+        } else {
+            1.0 - ((1.0 - cd) / cs).min(1.0)
+        }
     };
     let vivid = |cs: f32, cd: f32| {
         if cs < 0.5 {
             let s2 = 2.0 * cs;
-            if cd >= 1.0 { 1.0 } else if s2 <= 0.0 { 0.0 } else { 1.0 - ((1.0 - cd) / s2).min(1.0) }
+            if cd >= 1.0 {
+                1.0
+            } else if s2 <= 0.0 {
+                0.0
+            } else {
+                1.0 - ((1.0 - cd) / s2).min(1.0)
+            }
         } else {
             let s2m1 = 2.0 * cs - 1.0;
-            if cd <= 0.0 { 0.0 } else if s2m1 >= 1.0 { 1.0 } else { (cd / (1.0 - s2m1)).min(1.0) }
+            if cd <= 0.0 {
+                0.0
+            } else if s2m1 >= 1.0 {
+                1.0
+            } else {
+                (cd / (1.0 - s2m1)).min(1.0)
+            }
         }
     };
     let hard_mix = move |cs: f32, cd: f32| -> f32 { if vivid(cs, cd) < 0.5 { 0.0 } else { 1.0 } };
@@ -276,24 +329,72 @@ fn overlay_hardlight_premul_matches_unpremul_reference() {
         if cs <= 0.5 {
             cd - (1.0 - 2.0 * cs) * cd * (1.0 - cd)
         } else {
-            let g = if cd <= 0.25 { ((16.0 * cd - 12.0) * cd + 4.0) * cd } else { cd.sqrt() };
+            let g = if cd <= 0.25 {
+                ((16.0 * cd - 12.0) * cd + 4.0) * cd
+            } else {
+                cd.sqrt()
+            };
             cd + (2.0 * cs - 1.0) * (g - cd)
         }
     };
     let pin_light = |cs: f32, cd: f32| {
-        if cs < 0.5 { cd.min(2.0 * cs) } else { cd.max(2.0 * cs - 1.0) }
+        if cs < 0.5 {
+            cd.min(2.0 * cs)
+        } else {
+            cd.max(2.0 * cs - 1.0)
+        }
     };
     for (name, mode, f) in [
-        ("Overlay", BlendMode::Overlay, &overlay as &dyn Fn(f32, f32) -> f32),
-        ("HardLight", BlendMode::HardLight, &hard_light as &dyn Fn(f32, f32) -> f32),
-        ("LinearLight", BlendMode::LinearLight, &linear_light as &dyn Fn(f32, f32) -> f32),
-        ("PinLight", BlendMode::PinLight, &pin_light as &dyn Fn(f32, f32) -> f32),
-        ("ColorDodge", BlendMode::ColorDodge, &color_dodge as &dyn Fn(f32, f32) -> f32),
-        ("Divide", BlendMode::Divide, &divide as &dyn Fn(f32, f32) -> f32),
-        ("ColorBurn", BlendMode::ColorBurn, &color_burn as &dyn Fn(f32, f32) -> f32),
-        ("VividLight", BlendMode::VividLight, &vivid as &dyn Fn(f32, f32) -> f32),
-        ("HardMix", BlendMode::HardMix, &hard_mix as &dyn Fn(f32, f32) -> f32),
-        ("SoftLight", BlendMode::SoftLight, &soft_light as &dyn Fn(f32, f32) -> f32),
+        (
+            "Overlay",
+            BlendMode::Overlay,
+            &overlay as &dyn Fn(f32, f32) -> f32,
+        ),
+        (
+            "HardLight",
+            BlendMode::HardLight,
+            &hard_light as &dyn Fn(f32, f32) -> f32,
+        ),
+        (
+            "LinearLight",
+            BlendMode::LinearLight,
+            &linear_light as &dyn Fn(f32, f32) -> f32,
+        ),
+        (
+            "PinLight",
+            BlendMode::PinLight,
+            &pin_light as &dyn Fn(f32, f32) -> f32,
+        ),
+        (
+            "ColorDodge",
+            BlendMode::ColorDodge,
+            &color_dodge as &dyn Fn(f32, f32) -> f32,
+        ),
+        (
+            "Divide",
+            BlendMode::Divide,
+            &divide as &dyn Fn(f32, f32) -> f32,
+        ),
+        (
+            "ColorBurn",
+            BlendMode::ColorBurn,
+            &color_burn as &dyn Fn(f32, f32) -> f32,
+        ),
+        (
+            "VividLight",
+            BlendMode::VividLight,
+            &vivid as &dyn Fn(f32, f32) -> f32,
+        ),
+        (
+            "HardMix",
+            BlendMode::HardMix,
+            &hard_mix as &dyn Fn(f32, f32) -> f32,
+        ),
+        (
+            "SoftLight",
+            BlendMode::SoftLight,
+            &soft_light as &dyn Fn(f32, f32) -> f32,
+        ),
     ] {
         let fg0 = mk(&mut s);
         let bg = mk(&mut s);
@@ -307,6 +408,9 @@ fn overlay_hardlight_premul_matches_unpremul_reference() {
             .map(|(g, w)| (g - w).abs())
             .fold(0.0f32, f32::max);
         println!("{name:12} premul-vs-unpremul max deviation {dev:e}");
-        assert!(dev <= 5e-4, "{name}: premultiplied form deviates {dev:e} from the reference");
+        assert!(
+            dev <= 5e-4,
+            "{name}: premultiplied form deviates {dev:e} from the reference"
+        );
     }
 }

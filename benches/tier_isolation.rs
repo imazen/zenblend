@@ -33,7 +33,6 @@ const TIER_NAME: &str = if cfg!(target_arch = "aarch64") {
 
 #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 fn set_simd(enabled: bool) -> bool {
-    use archmage::SimdToken;
     TierToken::dangerously_disable_token_process_wide(!enabled).is_ok()
 }
 
@@ -114,46 +113,93 @@ fn main() {
     {
         set_simd(true);
         let mut d = bg.clone();
-        let time = |label: &str, mut f: Box<dyn FnMut(&mut Vec<f32>)>, d: &mut Vec<f32>| -> f64 {
-            for _ in 0..(iters / 10).max(1) { d.copy_from_slice(&bg); f(d); }
+        type RowFn = Box<dyn FnMut(&mut Vec<f32>)>;
+        let time = |label: &str, mut f: RowFn, d: &mut Vec<f32>| -> f64 {
+            for _ in 0..(iters / 10).max(1) {
+                d.copy_from_slice(&bg);
+                f(d);
+            }
             let start = Instant::now();
-            for _ in 0..iters { d.copy_from_slice(&bg); f(d); }
+            for _ in 0..iters {
+                d.copy_from_slice(&bg);
+                f(d);
+            }
             let ns = start.elapsed().as_nanos() as f64 / iters as f64;
             println!("{label:<32} {ns:>8.1} ns/row");
             ns
         };
         let fg1 = fg.clone();
-        let new_ns = time("Overlay premul (new)",
-            Box::new(move |x: &mut Vec<f32>| blend_row(black_box(x), black_box(&fg1), BlendMode::Overlay)), &mut d);
+        let new_ns = time(
+            "Overlay premul (new)",
+            Box::new(move |x: &mut Vec<f32>| {
+                blend_row(black_box(x), black_box(&fg1), BlendMode::Overlay)
+            }),
+            &mut d,
+        );
         let fg2 = fg.clone();
-        let old_ns = time("Overlay unpremul (original)",
-            Box::new(move |x: &mut Vec<f32>| zenblend::__bench_overlay_unpremul(black_box(x), black_box(&fg2))), &mut d);
+        let old_ns = time(
+            "Overlay unpremul (original)",
+            Box::new(move |x: &mut Vec<f32>| {
+                zenblend::__bench_overlay_unpremul(black_box(x), black_box(&fg2))
+            }),
+            &mut d,
+        );
         println!("Overlay premul-vs-original       {:>5.2}x", old_ns / new_ns);
 
         for (label, mode, orig) in [
-            ("LinearLight", BlendMode::LinearLight,
-             zenblend::__bench_linear_light_unpremul as fn(&mut [f32], &[f32])),
-            ("PinLight", BlendMode::PinLight,
-             zenblend::__bench_pin_light_unpremul as fn(&mut [f32], &[f32])),
-            ("ColorDodge", BlendMode::ColorDodge,
-             zenblend::__bench_color_dodge_unpremul as fn(&mut [f32], &[f32])),
-            ("Divide", BlendMode::Divide,
-             zenblend::__bench_divide_unpremul as fn(&mut [f32], &[f32])),
-            ("ColorBurn", BlendMode::ColorBurn,
-             zenblend::__bench_color_burn_unpremul as fn(&mut [f32], &[f32])),
-            ("VividLight", BlendMode::VividLight,
-             zenblend::__bench_vivid_light_unpremul as fn(&mut [f32], &[f32])),
-            ("HardMix", BlendMode::HardMix,
-             zenblend::__bench_hard_mix_unpremul as fn(&mut [f32], &[f32])),
-            ("SoftLight", BlendMode::SoftLight,
-             zenblend::__bench_soft_light_unpremul as fn(&mut [f32], &[f32])),
+            (
+                "LinearLight",
+                BlendMode::LinearLight,
+                zenblend::__bench_linear_light_unpremul as fn(&mut [f32], &[f32]),
+            ),
+            (
+                "PinLight",
+                BlendMode::PinLight,
+                zenblend::__bench_pin_light_unpremul as fn(&mut [f32], &[f32]),
+            ),
+            (
+                "ColorDodge",
+                BlendMode::ColorDodge,
+                zenblend::__bench_color_dodge_unpremul as fn(&mut [f32], &[f32]),
+            ),
+            (
+                "Divide",
+                BlendMode::Divide,
+                zenblend::__bench_divide_unpremul as fn(&mut [f32], &[f32]),
+            ),
+            (
+                "ColorBurn",
+                BlendMode::ColorBurn,
+                zenblend::__bench_color_burn_unpremul as fn(&mut [f32], &[f32]),
+            ),
+            (
+                "VividLight",
+                BlendMode::VividLight,
+                zenblend::__bench_vivid_light_unpremul as fn(&mut [f32], &[f32]),
+            ),
+            (
+                "HardMix",
+                BlendMode::HardMix,
+                zenblend::__bench_hard_mix_unpremul as fn(&mut [f32], &[f32]),
+            ),
+            (
+                "SoftLight",
+                BlendMode::SoftLight,
+                zenblend::__bench_soft_light_unpremul as fn(&mut [f32], &[f32]),
+            ),
         ] {
             let f1 = fg.clone();
-            let n_ns = time(&format!("{label} premul (new)"),
-                Box::new(move |x: &mut Vec<f32>| blend_row(black_box(x), black_box(&f1), mode)), &mut d);
+            let n_ns = time(
+                &format!("{label} premul (new)"),
+                Box::new(move |x: &mut Vec<f32>| blend_row(black_box(x), black_box(&f1), mode)),
+                &mut d,
+            );
             let f2 = fg.clone();
-            let o_ns = time(&format!("{label} unpremul (original)"),
-                Box::new(move |x: &mut Vec<f32>| orig(black_box(x), black_box(&f2))), &mut d);
+            let o_ns = time(
+                &format!("{label} unpremul (original)"),
+                Box::new(move |x: &mut Vec<f32>| orig(black_box(x), black_box(&f2))),
+                &mut d,
+            );
             println!("{label} premul-vs-original   {:>5.2}x", o_ns / n_ns);
         }
         println!();
