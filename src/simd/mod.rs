@@ -1,7 +1,9 @@
 //! SIMD-accelerated blend kernels.
 //!
 //! Uses archmage `incant!` dispatch to select the best available implementation:
-//! - x86_64: AVX2+FMA via magetypes `f32x8` (2 pixels/iter)
+//! - x86_64: AVX2+FMA via magetypes `f32x8` (2 pixels/iter) for SrcOver, mask
+//!   and lerp; the other Porter-Duff rows run the portable `f32x4<T>` kernels
+//!   on the `v3` token (see `x86.rs`)
 //! - AArch64 / WASM32 / scalar: portable `f32x4<T>` kernels (1 pixel/iter)
 
 mod portable;
@@ -47,9 +49,6 @@ pub(crate) fn blend_dst_atop_row_scalar(t: ScalarToken, fg: &mut [f32], bg: &[f3
 }
 pub(crate) fn blend_xor_row_scalar(t: ScalarToken, fg: &mut [f32], bg: &[f32]) {
     portable::blend_xor_row(t, fg, bg);
-}
-pub(crate) fn blend_plus_row_scalar(t: ScalarToken, fg: &mut [f32], bg: &[f32]) {
-    portable::blend_plus_row(t, fg, bg);
 }
 pub(crate) fn blend_src_over_solid_scalar(t: ScalarToken, fg: &mut [f32], px: &[f32; 4]) {
     portable::blend_src_over_solid(t, fg, px);
@@ -256,9 +255,6 @@ mod _neon_wrappers {
     pub(crate) fn blend_xor_row_neon(t: NeonToken, fg: &mut [f32], bg: &[f32]) {
         super::portable::blend_xor_row(t, fg, bg);
     }
-    pub(crate) fn blend_plus_row_neon(t: NeonToken, fg: &mut [f32], bg: &[f32]) {
-        super::portable::blend_plus_row(t, fg, bg);
-    }
     pub(crate) fn blend_src_over_solid_neon(t: NeonToken, fg: &mut [f32], px: &[f32; 4]) {
         super::portable::blend_src_over_solid(t, fg, px);
     }
@@ -341,9 +337,6 @@ mod _wasm_wrappers {
     }
     pub(crate) fn blend_xor_row_wasm128(t: Wasm128Token, fg: &mut [f32], bg: &[f32]) {
         super::portable::blend_xor_row(t, fg, bg);
-    }
-    pub(crate) fn blend_plus_row_wasm128(t: Wasm128Token, fg: &mut [f32], bg: &[f32]) {
-        super::portable::blend_plus_row(t, fg, bg);
     }
 
     pub(crate) fn blend_src_over_solid_wasm128(t: Wasm128Token, fg: &mut [f32], px: &[f32; 4]) {
@@ -443,10 +436,6 @@ pub(crate) fn blend_dst_atop_row(fg: &mut [f32], bg: &[f32]) {
 
 pub(crate) fn blend_xor_row(fg: &mut [f32], bg: &[f32]) {
     archmage::incant!(blend_xor_row(fg, bg))
-}
-
-pub(crate) fn blend_plus_row(fg: &mut [f32], bg: &[f32]) {
-    archmage::incant!(blend_plus_row(fg, bg))
 }
 
 /// SrcOver solid: fg[i] += pixel[c] * (1 - fg_alpha). No row buffer.

@@ -78,25 +78,52 @@ macro_rules! porter_duff_row {
     };
 }
 
-porter_duff_row!(blend_src_in_row, "SrcIn: `fg * da`.",
-    |t: T, f: f32x4<T>, _b: f32x4<T>, _sa: f32x4<T>, da: f32x4<T>| { let _ = t; f * da });
-porter_duff_row!(blend_dst_in_row, "DstIn: `bg * sa`.",
-    |t: T, _f: f32x4<T>, b: f32x4<T>, sa: f32x4<T>, _da: f32x4<T>| { let _ = t; b * sa });
-porter_duff_row!(blend_src_out_row, "SrcOut: `fg * (1 - da)`.",
-    |t: T, f: f32x4<T>, _b: f32x4<T>, _sa: f32x4<T>, da: f32x4<T>| f * (f32x4::splat(t, 1.0) - da));
-porter_duff_row!(blend_dst_out_row, "DstOut: `bg * (1 - sa)`.",
-    |t: T, _f: f32x4<T>, b: f32x4<T>, sa: f32x4<T>, _da: f32x4<T>| b * (f32x4::splat(t, 1.0) - sa));
-porter_duff_row!(blend_src_atop_row, "SrcAtop: `fg*da + bg*(1 - sa)`.",
-    |t: T, f: f32x4<T>, b: f32x4<T>, sa: f32x4<T>, da: f32x4<T>| f * da + b * (f32x4::splat(t, 1.0) - sa));
-porter_duff_row!(blend_dst_atop_row, "DstAtop: `bg*sa + fg*(1 - da)`.",
-    |t: T, f: f32x4<T>, b: f32x4<T>, sa: f32x4<T>, da: f32x4<T>| b * sa + f * (f32x4::splat(t, 1.0) - da));
-porter_duff_row!(blend_xor_row, "Xor: `fg*(1 - da) + bg*(1 - sa)`.",
+porter_duff_row!(
+    blend_src_in_row,
+    "SrcIn: `fg * da`.",
+    |t: T, f: f32x4<T>, _b: f32x4<T>, _sa: f32x4<T>, da: f32x4<T>| {
+        let _ = t;
+        f * da
+    }
+);
+porter_duff_row!(
+    blend_dst_in_row,
+    "DstIn: `bg * sa`.",
+    |t: T, _f: f32x4<T>, b: f32x4<T>, sa: f32x4<T>, _da: f32x4<T>| {
+        let _ = t;
+        b * sa
+    }
+);
+porter_duff_row!(
+    blend_src_out_row,
+    "SrcOut: `fg * (1 - da)`.",
+    |t: T, f: f32x4<T>, _b: f32x4<T>, _sa: f32x4<T>, da: f32x4<T>| f * (f32x4::splat(t, 1.0) - da)
+);
+porter_duff_row!(
+    blend_dst_out_row,
+    "DstOut: `bg * (1 - sa)`.",
+    |t: T, _f: f32x4<T>, b: f32x4<T>, sa: f32x4<T>, _da: f32x4<T>| b * (f32x4::splat(t, 1.0) - sa)
+);
+porter_duff_row!(
+    blend_src_atop_row,
+    "SrcAtop: `fg*da + bg*(1 - sa)`.",
+    |t: T, f: f32x4<T>, b: f32x4<T>, sa: f32x4<T>, da: f32x4<T>| f * da
+        + b * (f32x4::splat(t, 1.0) - sa)
+);
+porter_duff_row!(
+    blend_dst_atop_row,
+    "DstAtop: `bg*sa + fg*(1 - da)`.",
+    |t: T, f: f32x4<T>, b: f32x4<T>, sa: f32x4<T>, da: f32x4<T>| b * sa
+        + f * (f32x4::splat(t, 1.0) - da)
+);
+porter_duff_row!(
+    blend_xor_row,
+    "Xor: `fg*(1 - da) + bg*(1 - sa)`.",
     |t: T, f: f32x4<T>, b: f32x4<T>, sa: f32x4<T>, da: f32x4<T>| {
         let one = f32x4::splat(t, 1.0);
         f * (one - da) + b * (one - sa)
-    });
-porter_duff_row!(blend_plus_row, "Plus: `min(fg + bg, 1)`.",
-    |t: T, f: f32x4<T>, b: f32x4<T>, _sa: f32x4<T>, _da: f32x4<T>| (f + b).min(f32x4::splat(t, 1.0)));
+    }
+);
 
 /// SrcOver solid pixel blend using magetypes f32x4.
 #[inline]
@@ -391,13 +418,7 @@ artistic_premul_fn!(
 // and `sa·da·f` is exactly what the VividLight term already is. So HardMix costs
 // one extra compare and select over VividLight, with no extra division.
 #[inline]
-fn vivid_term<T: F32x4Backend>(
-    t: T,
-    fg: f32x4<T>,
-    bg: f32x4<T>,
-    sa: f32,
-    da: f32,
-) -> f32x4<T> {
+fn vivid_term<T: F32x4Backend>(t: T, fg: f32x4<T>, bg: f32x4<T>, sa: f32, da: f32) -> f32x4<T> {
     let zero = f32x4::splat(t, 0.0);
     let two = f32x4::splat(t, 2.0);
     let sada = f32x4::splat(t, sa * da);
@@ -430,7 +451,11 @@ artistic_premul_fn!(
         let sada = f32x4::splat(t, sa * da);
         let v = vivid_term(t, fg, bg, sa, da);
         // f < 0.5  <->  sa·da·f < 0.5·sa·da
-        base + f32x4::blend(v.simd_lt(f32x4::splat(t, 0.5 * sa * da)), f32x4::splat(t, 0.0), sada)
+        base + f32x4::blend(
+            v.simd_lt(f32x4::splat(t, 0.5 * sa * da)),
+            f32x4::splat(t, 0.0),
+            sada,
+        )
     }
 );
 
@@ -471,9 +496,8 @@ artistic_premul_fn!(
 
         let lo = cd - (one - two * cs) * cd * (one - cd);
 
-        let poly = ((f32x4::splat(t, 16.0) * cd - f32x4::splat(t, 12.0)) * cd
-            + f32x4::splat(t, 4.0))
-            * cd;
+        let poly =
+            ((f32x4::splat(t, 16.0) * cd - f32x4::splat(t, 12.0)) * cd + f32x4::splat(t, 4.0)) * cd;
         let g = f32x4::blend(cd.simd_le(f32x4::splat(t, 0.25)), poly, cd.sqrt());
         let hi = cd + (two * cs - one) * (g - cd);
 

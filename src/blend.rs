@@ -1,7 +1,9 @@
 //! Blend mode dispatch: routes BlendMode enum to SIMD or scalar kernels.
 //!
-//! SrcOver uses SIMD-dispatched kernels. All other Porter-Duff and artistic
-//! modes use scalar implementations. The match happens once per row, not per pixel.
+//! SrcOver, the eight alpha-weighted Porter-Duff modes, and every artistic mode
+//! dispatch to SIMD kernels in `crate::simd`. Clear/Src/Dst are trivial copies
+//! and Plus stays scalar (measured; see its arm). The match happens once per
+//! row, not per pixel.
 
 use crate::BlendMode;
 use crate::simd;
@@ -96,11 +98,8 @@ pub(crate) fn dispatch_blend_row_solid(fg: &mut [f32], pixel: &[f32; 4], mode: B
                 _ => {}
             }
             // General path: repeat the solid pixel into a temp row and delegate
-            for s in fg.chunks_exact_mut(4) {
-                let mut px = [s[0], s[1], s[2], s[3]];
-                let bg = *pixel;
-                dispatch_blend_pixel(&mut px, &bg, other);
-                s.copy_from_slice(&px);
+            for s in fg.as_chunks_mut::<4>().0 {
+                dispatch_blend_pixel(s, pixel, other);
             }
         }
     }
@@ -252,9 +251,15 @@ fn dispatch_blend_pixel(fg: &mut [f32; 4], bg: &[f32; 4], mode: BlendMode) {
                 d.max(2.0 * s - 1.0)
             }
         }),
-        BlendMode::HardMix => blend_artistic_pixel(fg, bg, |s, d| {
-            if vivid_light_fn(s, d) < 0.5 { 0.0 } else { 1.0 }
-        }),
+        BlendMode::HardMix => {
+            blend_artistic_pixel(
+                fg,
+                bg,
+                |s, d| {
+                    if vivid_light_fn(s, d) < 0.5 { 0.0 } else { 1.0 }
+                },
+            )
+        }
         BlendMode::Divide => blend_artistic_pixel(fg, bg, |s, d| {
             if s <= 0.0 {
                 1.0 // d / 0 → 1.0 (clamped)
@@ -278,117 +283,6 @@ fn dispatch_blend_pixel(fg: &mut [f32; 4], bg: &[f32; 4], mode: BlendMode) {
 fn blend_clear(fg: &mut [f32]) {
     for v in fg.iter_mut() {
         *v = 0.0;
-    }
-}
-
-#[inline]
-fn blend_dst_over(fg: &mut [f32], bg: &[f32]) {
-    for (s, b) in fg.chunks_exact_mut(4).zip(bg.chunks_exact(4)) {
-        let inv_da = 1.0 - b[3];
-        let r = b[0] + s[0] * inv_da;
-        let g = b[1] + s[1] * inv_da;
-        let bl = b[2] + s[2] * inv_da;
-        let a = b[3] + s[3] * inv_da;
-        s[0] = r;
-        s[1] = g;
-        s[2] = bl;
-        s[3] = a;
-    }
-}
-
-#[inline]
-fn blend_src_in(fg: &mut [f32], bg: &[f32]) {
-    for (s, b) in fg.chunks_exact_mut(4).zip(bg.chunks_exact(4)) {
-        let da = b[3];
-        s[0] *= da;
-        s[1] *= da;
-        s[2] *= da;
-        s[3] *= da;
-    }
-}
-
-#[inline]
-fn blend_dst_in(fg: &mut [f32], bg: &[f32]) {
-    for (s, b) in fg.chunks_exact_mut(4).zip(bg.chunks_exact(4)) {
-        let sa = s[3];
-        s[0] = b[0] * sa;
-        s[1] = b[1] * sa;
-        s[2] = b[2] * sa;
-        s[3] = b[3] * sa;
-    }
-}
-
-#[inline]
-fn blend_src_out(fg: &mut [f32], bg: &[f32]) {
-    for (s, b) in fg.chunks_exact_mut(4).zip(bg.chunks_exact(4)) {
-        let inv_da = 1.0 - b[3];
-        s[0] *= inv_da;
-        s[1] *= inv_da;
-        s[2] *= inv_da;
-        s[3] *= inv_da;
-    }
-}
-
-#[inline]
-fn blend_dst_out(fg: &mut [f32], bg: &[f32]) {
-    for (s, b) in fg.chunks_exact_mut(4).zip(bg.chunks_exact(4)) {
-        let inv_sa = 1.0 - s[3];
-        s[0] = b[0] * inv_sa;
-        s[1] = b[1] * inv_sa;
-        s[2] = b[2] * inv_sa;
-        s[3] = b[3] * inv_sa;
-    }
-}
-
-#[inline]
-fn blend_src_atop(fg: &mut [f32], bg: &[f32]) {
-    for (s, b) in fg.chunks_exact_mut(4).zip(bg.chunks_exact(4)) {
-        let sa = s[3];
-        let da = b[3];
-        let inv_sa = 1.0 - sa;
-        let r = s[0] * da + b[0] * inv_sa;
-        let g = s[1] * da + b[1] * inv_sa;
-        let bl = s[2] * da + b[2] * inv_sa;
-        let a = sa * da + b[3] * inv_sa;
-        s[0] = r;
-        s[1] = g;
-        s[2] = bl;
-        s[3] = a;
-    }
-}
-
-#[inline]
-fn blend_dst_atop(fg: &mut [f32], bg: &[f32]) {
-    for (s, b) in fg.chunks_exact_mut(4).zip(bg.chunks_exact(4)) {
-        let sa = s[3];
-        let da = b[3];
-        let inv_da = 1.0 - da;
-        let r = b[0] * sa + s[0] * inv_da;
-        let g = b[1] * sa + s[1] * inv_da;
-        let bl = b[2] * sa + s[2] * inv_da;
-        let a = b[3] * sa + s[3] * inv_da;
-        s[0] = r;
-        s[1] = g;
-        s[2] = bl;
-        s[3] = a;
-    }
-}
-
-#[inline]
-fn blend_xor(fg: &mut [f32], bg: &[f32]) {
-    for (s, b) in fg.chunks_exact_mut(4).zip(bg.chunks_exact(4)) {
-        let sa = s[3];
-        let da = b[3];
-        let inv_sa = 1.0 - sa;
-        let inv_da = 1.0 - da;
-        let r = s[0] * inv_da + b[0] * inv_sa;
-        let g = s[1] * inv_da + b[1] * inv_sa;
-        let bl = s[2] * inv_da + b[2] * inv_sa;
-        let a = s[3] * inv_da + b[3] * inv_sa;
-        s[0] = r;
-        s[1] = g;
-        s[2] = bl;
-        s[3] = a;
     }
 }
 
@@ -457,7 +351,12 @@ macro_rules! artistic_row {
         #[inline]
         #[allow(dead_code)]
         pub(crate) fn $name(fg: &mut [f32], bg: &[f32]) {
-            for (s, b) in fg.chunks_exact_mut(4).zip(bg.chunks_exact(4)) {
+            for (s, b) in fg
+                .as_chunks_mut::<4>()
+                .0
+                .iter_mut()
+                .zip(bg.as_chunks::<4>().0)
+            {
                 let mut pixel: [f32; 4] = [s[0], s[1], s[2], s[3]];
                 let bg_pixel: [f32; 4] = [b[0], b[1], b[2], b[3]];
                 blend_artistic_pixel(&mut pixel, &bg_pixel, $f);
@@ -574,7 +473,12 @@ fn vivid_light_fn(s: f32, d: f32) -> f32 {
 /// Plus: premultiplied add with clamp. Does NOT unpremultiply.
 #[inline]
 fn blend_plus(fg: &mut [f32], bg: &[f32]) {
-    for (s, b) in fg.chunks_exact_mut(4).zip(bg.chunks_exact(4)) {
+    for (s, b) in fg
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(bg.as_chunks::<4>().0)
+    {
         s[0] = (s[0] + b[0]).min(1.0);
         s[1] = (s[1] + b[1]).min(1.0);
         s[2] = (s[2] + b[2]).min(1.0);
@@ -645,7 +549,12 @@ mod simd_equiv_tests {
 
         let mut max_diff = 0.0f32;
         let mut over = 0usize;
-        for (px_s, px_r) in fg_simd.chunks_exact(4).zip(fg_scalar.chunks_exact(4)) {
+        for (px_s, px_r) in fg_simd
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .zip(fg_scalar.as_chunks::<4>().0)
+        {
             let mut pmax = 0.0f32;
             for (a, b) in px_s.iter().zip(px_r.iter()) {
                 let d = (a - b).abs();
@@ -701,62 +610,183 @@ mod simd_equiv_tests {
 }
 
 #[cfg(test)]
-mod dst_over_simd_gate {
-    use super::*;
+mod porter_duff_simd_gate {
+    //! The SIMD Porter-Duff rows must equal the scalar references BIT-FOR-BIT.
+    //!
+    //! The references below are the scalar loops these eight modes shipped with
+    //! before 2026-08-01, kept ONLY here so the `f32x4` kernels cannot drift
+    //! from them. Every mode applies the same op to all four channels, alpha
+    //! included, in the same order the vector kernels use, so exact equality is
+    //! the right bar: no FMA, no reassociation, no tolerance. This gate runs on
+    //! whatever tier `incant!` picks natively, so it covers NEON here and the
+    //! x86_64 `v3` tier on the x86 CI lanes.
+    //!
+    //! DstOver is the trap: `out = bg + fg * (1 - bg_alpha)`. The surviving
+    //! alpha is the BACKGROUND's, so reading `fg[3]` instead of `bg[3]`
+    //! (copy-paste from the SrcOver kernel it mirrors) would be wrong everywhere
+    //! the two alphas differ, which is most real content.
 
-    /// The SIMD DstOver must equal the scalar reference BIT-FOR-BIT.
-    ///
-    /// The operation is `out = bg + fg * (1 - bg_alpha)` on all four channels.
-    /// The asymmetry with SrcOver is the trap: the surviving alpha is the
-    /// BACKGROUND's, so reading `fg[3]` instead of `bg[3]` (copy-paste from the
-    /// SrcOver kernel it mirrors) would be wrong everywhere the two alphas
-    /// differ, which is most real content.
+    type Row = fn(&mut [f32], &[f32]);
+
+    fn rows<'a>(
+        fg: &'a mut [f32],
+        bg: &'a [f32],
+    ) -> impl Iterator<Item = (&'a mut [f32; 4], &'a [f32; 4])> {
+        fg.as_chunks_mut::<4>()
+            .0
+            .iter_mut()
+            .zip(bg.as_chunks::<4>().0)
+    }
+
+    fn dst_over(fg: &mut [f32], bg: &[f32]) {
+        for (s, b) in rows(fg, bg) {
+            let inv_da = 1.0 - b[3];
+            let r = b[0] + s[0] * inv_da;
+            let g = b[1] + s[1] * inv_da;
+            let bl = b[2] + s[2] * inv_da;
+            let a = b[3] + s[3] * inv_da;
+            s[0] = r;
+            s[1] = g;
+            s[2] = bl;
+            s[3] = a;
+        }
+    }
+
+    fn src_in(fg: &mut [f32], bg: &[f32]) {
+        for (s, b) in rows(fg, bg) {
+            let da = b[3];
+            s[0] *= da;
+            s[1] *= da;
+            s[2] *= da;
+            s[3] *= da;
+        }
+    }
+
+    fn dst_in(fg: &mut [f32], bg: &[f32]) {
+        for (s, b) in rows(fg, bg) {
+            let sa = s[3];
+            s[0] = b[0] * sa;
+            s[1] = b[1] * sa;
+            s[2] = b[2] * sa;
+            s[3] = b[3] * sa;
+        }
+    }
+
+    fn src_out(fg: &mut [f32], bg: &[f32]) {
+        for (s, b) in rows(fg, bg) {
+            let inv_da = 1.0 - b[3];
+            s[0] *= inv_da;
+            s[1] *= inv_da;
+            s[2] *= inv_da;
+            s[3] *= inv_da;
+        }
+    }
+
+    fn dst_out(fg: &mut [f32], bg: &[f32]) {
+        for (s, b) in rows(fg, bg) {
+            let inv_sa = 1.0 - s[3];
+            s[0] = b[0] * inv_sa;
+            s[1] = b[1] * inv_sa;
+            s[2] = b[2] * inv_sa;
+            s[3] = b[3] * inv_sa;
+        }
+    }
+
+    fn src_atop(fg: &mut [f32], bg: &[f32]) {
+        for (s, b) in rows(fg, bg) {
+            let sa = s[3];
+            let da = b[3];
+            let inv_sa = 1.0 - sa;
+            let r = s[0] * da + b[0] * inv_sa;
+            let g = s[1] * da + b[1] * inv_sa;
+            let bl = s[2] * da + b[2] * inv_sa;
+            let a = sa * da + b[3] * inv_sa;
+            s[0] = r;
+            s[1] = g;
+            s[2] = bl;
+            s[3] = a;
+        }
+    }
+
+    fn dst_atop(fg: &mut [f32], bg: &[f32]) {
+        for (s, b) in rows(fg, bg) {
+            let sa = s[3];
+            let da = b[3];
+            let inv_da = 1.0 - da;
+            let r = b[0] * sa + s[0] * inv_da;
+            let g = b[1] * sa + s[1] * inv_da;
+            let bl = b[2] * sa + s[2] * inv_da;
+            let a = b[3] * sa + s[3] * inv_da;
+            s[0] = r;
+            s[1] = g;
+            s[2] = bl;
+            s[3] = a;
+        }
+    }
+
+    fn xor(fg: &mut [f32], bg: &[f32]) {
+        for (s, b) in rows(fg, bg) {
+            let sa = s[3];
+            let da = b[3];
+            let inv_sa = 1.0 - sa;
+            let inv_da = 1.0 - da;
+            let r = s[0] * inv_da + b[0] * inv_sa;
+            let g = s[1] * inv_da + b[1] * inv_sa;
+            let bl = s[2] * inv_da + b[2] * inv_sa;
+            let a = s[3] * inv_da + b[3] * inv_sa;
+            s[0] = r;
+            s[1] = g;
+            s[2] = bl;
+            s[3] = a;
+        }
+    }
+
     #[test]
-    fn dst_over_simd_matches_scalar() {
+    fn porter_duff_simd_matches_scalar_bit_for_bit() {
+        let cases: [(&str, Row, Row); 8] = [
+            ("DstOver", crate::simd::blend_dst_over_row, dst_over),
+            ("SrcIn", crate::simd::blend_src_in_row, src_in),
+            ("DstIn", crate::simd::blend_dst_in_row, dst_in),
+            ("SrcOut", crate::simd::blend_src_out_row, src_out),
+            ("DstOut", crate::simd::blend_dst_out_row, dst_out),
+            ("SrcAtop", crate::simd::blend_src_atop_row, src_atop),
+            ("DstAtop", crate::simd::blend_dst_atop_row, dst_atop),
+            ("Xor", crate::simd::blend_xor_row, xor),
+        ];
         let mut s = 0xD00D_1E55u32;
-        for px in [0usize, 1, 2, 3, 4, 5, 7, 8, 16, 17, 64, 1000] {
-            let n = px * 4;
-            let mk = |seed: &mut u32| -> Vec<f32> {
-                (0..n)
-                    .map(|i| {
-                        *seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-                        // Alpha extremes in lane 3: 0 and 1 are where DstOver
-                        // degenerates (pure fg / pure bg).
-                        if i % 4 == 3 {
-                            match (*seed >> 16) % 3 {
-                                0 => 0.0,
-                                1 => 1.0,
-                                _ => (*seed >> 8) as f32 / 16_777_216.0,
+        for (name, simd, scalar) in cases {
+            for px in [0usize, 1, 2, 3, 4, 5, 7, 8, 16, 17, 64, 1000] {
+                let n = px * 4;
+                let mk = |seed: &mut u32| -> Vec<f32> {
+                    (0..n)
+                        .map(|i| {
+                            *seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                            // Alpha extremes in lane 3: 0 and 1 are where these
+                            // modes degenerate (pure fg / pure bg / all zero).
+                            if i % 4 == 3 {
+                                match (*seed >> 16) % 3 {
+                                    0 => 0.0,
+                                    1 => 1.0,
+                                    _ => (*seed >> 8) as f32 / 16_777_216.0,
+                                }
+                            } else {
+                                (*seed >> 8) as f32 / 16_777_216.0
                             }
-                        } else {
-                            (*seed >> 8) as f32 / 16_777_216.0
-                        }
-                    })
-                    .collect()
-            };
-            let fg0 = mk(&mut s);
-            let bg = mk(&mut s);
+                        })
+                        .collect()
+                };
+                let fg0 = mk(&mut s);
+                let bg = mk(&mut s);
 
-            let mut got = fg0.clone();
-            crate::simd::blend_dst_over_row(&mut got, &bg);
+                let mut got = fg0.clone();
+                simd(&mut got, &bg);
+                let mut want = fg0;
+                scalar(&mut want, &bg);
 
-            // The original scalar reference, inlined so this cannot drift.
-            let mut want = fg0.clone();
-            for (sp, b) in want.chunks_exact_mut(4).zip(bg.chunks_exact(4)) {
-                let inv_da = 1.0 - b[3];
-                let r = b[0] + sp[0] * inv_da;
-                let g = b[1] + sp[1] * inv_da;
-                let bl = b[2] + sp[2] * inv_da;
-                let a = b[3] + sp[3] * inv_da;
-                sp[0] = r;
-                sp[1] = g;
-                sp[2] = bl;
-                sp[3] = a;
+                let x: Vec<u32> = got.iter().map(|v| v.to_bits()).collect();
+                let y: Vec<u32> = want.iter().map(|v| v.to_bits()).collect();
+                assert_eq!(x, y, "SIMD {name} diverges from scalar at {px} px");
             }
-
-            let x: Vec<u32> = got.iter().map(|v| v.to_bits()).collect();
-            let y: Vec<u32> = want.iter().map(|v| v.to_bits()).collect();
-            assert_eq!(x, y, "SIMD DstOver diverges from scalar at {px} px");
         }
     }
 }
@@ -765,11 +795,18 @@ mod dst_over_simd_gate {
 /// measure the premultiplied replacement against what actually shipped before.
 #[cfg(feature = "_dev")]
 pub(crate) fn __overlay_unpremul_reference(fg: &mut [f32], bg: &[f32]) {
-    for (s, b) in fg.chunks_exact_mut(4).zip(bg.chunks_exact(4)) {
-        let sp: &mut [f32; 4] = s.try_into().unwrap();
-        let bp: &[f32; 4] = b.try_into().unwrap();
-        blend_artistic_pixel(sp, bp, |cs, cd| {
-            if cd < 0.5 { 2.0 * cs * cd } else { 1.0 - 2.0 * (1.0 - cs) * (1.0 - cd) }
+    for (s, b) in fg
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(bg.as_chunks::<4>().0)
+    {
+        blend_artistic_pixel(s, b, |cs, cd| {
+            if cd < 0.5 {
+                2.0 * cs * cd
+            } else {
+                1.0 - 2.0 * (1.0 - cs) * (1.0 - cd)
+            }
         });
     }
 }
@@ -777,17 +814,35 @@ pub(crate) fn __overlay_unpremul_reference(fg: &mut [f32], bg: &[f32]) {
 /// Pre-2026-08-01 unpremultiplying LinearLight / PinLight, for the bench only.
 #[cfg(feature = "_dev")]
 pub(crate) fn __linear_light_unpremul_reference(fg: &mut [f32], bg: &[f32]) {
-    for (s, b) in fg.chunks_exact_mut(4).zip(bg.chunks_exact(4)) {
-        blend_artistic_pixel(s.try_into().unwrap(), b.try_into().unwrap(), |cs, cd| {
-            if cs < 0.5 { (2.0 * cs + cd - 1.0).max(0.0) } else { (2.0 * cs - 1.0 + cd).min(1.0) }
+    for (s, b) in fg
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(bg.as_chunks::<4>().0)
+    {
+        blend_artistic_pixel(s, b, |cs, cd| {
+            if cs < 0.5 {
+                (2.0 * cs + cd - 1.0).max(0.0)
+            } else {
+                (2.0 * cs - 1.0 + cd).min(1.0)
+            }
         });
     }
 }
 #[cfg(feature = "_dev")]
 pub(crate) fn __pin_light_unpremul_reference(fg: &mut [f32], bg: &[f32]) {
-    for (s, b) in fg.chunks_exact_mut(4).zip(bg.chunks_exact(4)) {
-        blend_artistic_pixel(s.try_into().unwrap(), b.try_into().unwrap(), |cs, cd| {
-            if cs < 0.5 { cd.min(2.0 * cs) } else { cd.max(2.0 * cs - 1.0) }
+    for (s, b) in fg
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(bg.as_chunks::<4>().0)
+    {
+        blend_artistic_pixel(s, b, |cs, cd| {
+            if cs < 0.5 {
+                cd.min(2.0 * cs)
+            } else {
+                cd.max(2.0 * cs - 1.0)
+            }
         });
     }
 }
@@ -795,27 +850,58 @@ pub(crate) fn __pin_light_unpremul_reference(fg: &mut [f32], bg: &[f32]) {
 /// Pre-2026-08-01 unpremultiplying ColorDodge / Divide, for the bench only.
 #[cfg(feature = "_dev")]
 pub(crate) fn __color_dodge_unpremul_reference(fg: &mut [f32], bg: &[f32]) {
-    for (s, b) in fg.chunks_exact_mut(4).zip(bg.chunks_exact(4)) {
-        blend_artistic_pixel(s.try_into().unwrap(), b.try_into().unwrap(), |cs, cd| {
-            if cd <= 0.0 { 0.0 } else if cs >= 1.0 { 1.0 } else { (cd / (1.0 - cs)).min(1.0) }
+    for (s, b) in fg
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(bg.as_chunks::<4>().0)
+    {
+        blend_artistic_pixel(s, b, |cs, cd| {
+            if cd <= 0.0 {
+                0.0
+            } else if cs >= 1.0 {
+                1.0
+            } else {
+                (cd / (1.0 - cs)).min(1.0)
+            }
         });
     }
 }
 #[cfg(feature = "_dev")]
 pub(crate) fn __divide_unpremul_reference(fg: &mut [f32], bg: &[f32]) {
-    for (s, b) in fg.chunks_exact_mut(4).zip(bg.chunks_exact(4)) {
-        blend_artistic_pixel(s.try_into().unwrap(), b.try_into().unwrap(), |cs, cd| {
-            if cs <= 0.0 { 1.0 } else { (cd / cs).min(1.0) }
-        });
+    for (s, b) in fg
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(bg.as_chunks::<4>().0)
+    {
+        blend_artistic_pixel(
+            s,
+            b,
+            |cs, cd| {
+                if cs <= 0.0 { 1.0 } else { (cd / cs).min(1.0) }
+            },
+        );
     }
 }
 
 /// Pre-2026-08-01 unpremultiplying ColorBurn, for the bench only.
 #[cfg(feature = "_dev")]
 pub(crate) fn __color_burn_unpremul_reference(fg: &mut [f32], bg: &[f32]) {
-    for (s, b) in fg.chunks_exact_mut(4).zip(bg.chunks_exact(4)) {
-        blend_artistic_pixel(s.try_into().unwrap(), b.try_into().unwrap(), |cs, cd| {
-            if cd >= 1.0 { 1.0 } else if cs <= 0.0 { 0.0 } else { 1.0 - ((1.0 - cd) / cs).min(1.0) }
+    for (s, b) in fg
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(bg.as_chunks::<4>().0)
+    {
+        blend_artistic_pixel(s, b, |cs, cd| {
+            if cd >= 1.0 {
+                1.0
+            } else if cs <= 0.0 {
+                0.0
+            } else {
+                1.0 - ((1.0 - cd) / cs).min(1.0)
+            }
         });
     }
 }
@@ -823,15 +909,29 @@ pub(crate) fn __color_burn_unpremul_reference(fg: &mut [f32], bg: &[f32]) {
 /// Pre-2026-08-01 unpremultiplying VividLight / HardMix, for the bench only.
 #[cfg(feature = "_dev")]
 pub(crate) fn __vivid_light_unpremul_reference(fg: &mut [f32], bg: &[f32]) {
-    for (s, b) in fg.chunks_exact_mut(4).zip(bg.chunks_exact(4)) {
-        blend_artistic_pixel(s.try_into().unwrap(), b.try_into().unwrap(), vivid_light_fn);
+    for (s, b) in fg
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(bg.as_chunks::<4>().0)
+    {
+        blend_artistic_pixel(s, b, vivid_light_fn);
     }
 }
 #[cfg(feature = "_dev")]
 pub(crate) fn __hard_mix_unpremul_reference(fg: &mut [f32], bg: &[f32]) {
-    for (s, b) in fg.chunks_exact_mut(4).zip(bg.chunks_exact(4)) {
-        blend_artistic_pixel(s.try_into().unwrap(), b.try_into().unwrap(), |cs, cd| {
-            if vivid_light_fn(cs, cd) < 0.5 { 0.0 } else { 1.0 }
+    for (s, b) in fg
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(bg.as_chunks::<4>().0)
+    {
+        blend_artistic_pixel(s, b, |cs, cd| {
+            if vivid_light_fn(cs, cd) < 0.5 {
+                0.0
+            } else {
+                1.0
+            }
         });
     }
 }
@@ -839,12 +939,21 @@ pub(crate) fn __hard_mix_unpremul_reference(fg: &mut [f32], bg: &[f32]) {
 /// Pre-2026-08-01 unpremultiplying SoftLight, for the bench only.
 #[cfg(feature = "_dev")]
 pub(crate) fn __soft_light_unpremul_reference(fg: &mut [f32], bg: &[f32]) {
-    for (s, b) in fg.chunks_exact_mut(4).zip(bg.chunks_exact(4)) {
-        blend_artistic_pixel(s.try_into().unwrap(), b.try_into().unwrap(), |cs, cd| {
+    for (s, b) in fg
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(bg.as_chunks::<4>().0)
+    {
+        blend_artistic_pixel(s, b, |cs, cd| {
             if cs <= 0.5 {
                 cd - (1.0 - 2.0 * cs) * cd * (1.0 - cd)
             } else {
-                let g = if cd <= 0.25 { ((16.0 * cd - 12.0) * cd + 4.0) * cd } else { cd.sqrt() };
+                let g = if cd <= 0.25 {
+                    ((16.0 * cd - 12.0) * cd + 4.0) * cd
+                } else {
+                    cd.sqrt()
+                };
                 cd + (2.0 * cs - 1.0) * (g - cd)
             }
         });

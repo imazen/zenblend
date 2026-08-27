@@ -36,8 +36,10 @@ pub(crate) fn blend_src_over_row_v3(token: X64V3Token, fg: &mut [f32], bg: &[f32
     let remaining_fg = &mut fg[done..];
     let remaining_bg = &bg[done..];
     for (s, b) in remaining_fg
-        .chunks_exact_mut(4)
-        .zip(remaining_bg.chunks_exact(4))
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(remaining_bg.as_chunks::<4>().0)
     {
         let inv_a = 1.0 - s[3];
         s[0] += b[0] * inv_a;
@@ -74,7 +76,7 @@ pub(crate) fn blend_src_over_solid_v3(token: X64V3Token, fg: &mut [f32], pixel: 
     // Scalar tail
     let done = fg_chunks.len() * 8;
     let remaining = &mut fg[done..];
-    for s in remaining.chunks_exact_mut(4) {
+    for s in remaining.as_chunks_mut::<4>().0 {
         let inv_a = 1.0 - s[3];
         s[0] += pixel[0] * inv_a;
         s[1] += pixel[1] * inv_a;
@@ -114,7 +116,7 @@ pub(crate) fn blend_src_over_solid_opaque_v3(token: X64V3Token, fg: &mut [f32], 
     // Scalar tail
     let done = fg_chunks.len() * 8;
     let remaining = &mut fg[done..];
-    for s in remaining.chunks_exact_mut(4) {
+    for s in remaining.as_chunks_mut::<4>().0 {
         let inv_a = 1.0 - s[3];
         s[0] += pixel[0] * inv_a;
         s[1] += pixel[1] * inv_a;
@@ -156,7 +158,12 @@ pub(crate) fn mask_row_apply_v3(token: X64V3Token, fg: &mut [f32], mask: &[f32])
     let done = fg_chunks.len() * 2;
     let remaining_fg = &mut fg[done * 4..];
     let remaining_mask = &mask[done..];
-    for (pixel, &m) in remaining_fg.chunks_exact_mut(4).zip(remaining_mask.iter()) {
+    for (pixel, &m) in remaining_fg
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(remaining_mask.iter())
+    {
         pixel[0] *= m;
         pixel[1] *= m;
         pixel[2] *= m;
@@ -202,7 +209,12 @@ pub(crate) fn mask_row_rgb_apply_v3(token: X64V3Token, fg: &mut [f32], mask: &[f
     let done = fg_chunks.len() * 2;
     let remaining_fg = &mut fg[done * 4..];
     let remaining_mask = &mask[done..];
-    for (pixel, &m) in remaining_fg.chunks_exact_mut(4).zip(remaining_mask.iter()) {
+    for (pixel, &m) in remaining_fg
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(remaining_mask.iter())
+    {
         pixel[0] *= m;
         pixel[1] *= m;
         pixel[2] *= m;
@@ -254,9 +266,11 @@ pub(crate) fn lerp_row_apply_v3(
     let t_rem = &t[done..];
     let out_rem = &mut out[done * 4..];
     for ((a_px, b_px), (&tv, out_px)) in a_rem
-        .chunks_exact(4)
-        .zip(b_rem.chunks_exact(4))
-        .zip(t_rem.iter().zip(out_rem.chunks_exact_mut(4)))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(b_rem.as_chunks::<4>().0)
+        .zip(t_rem.iter().zip(out_rem.as_chunks_mut::<4>().0))
     {
         out_px[0] = a_px[0] + (b_px[0] - a_px[0]) * tv;
         out_px[1] = a_px[1] + (b_px[1] - a_px[1]) * tv;
@@ -264,3 +278,36 @@ pub(crate) fn lerp_row_apply_v3(
         out_px[3] = a_px[3] + (b_px[3] - a_px[3]) * tv;
     }
 }
+
+// ---------------------------------------------------------------------------
+// Porter-Duff modes: the `_v3` tier via the shared generic `f32x4` kernels.
+//
+// `incant!` with the default tier list requires a `<name>_v3` variant on
+// x86_64. The 2026-08-01 commit that vectorized these eight modes was built and
+// tested on aarch64 only and never produced them, which broke every x86_64
+// build. `X64V3Token` implements `F32x4Backend`, so the portable kernels run
+// here on SSE — one pixel per register, the same arithmetic as the NEON and
+// scalar tiers, which is what keeps the bit-for-bit gates honest. A 2-pixel
+// AVX2 `f32x8` form like `blend_src_over_row_v3` is a later perf item.
+// ---------------------------------------------------------------------------
+macro_rules! porter_duff_v3 {
+    ($($name:ident => $portable:ident),* $(,)?) => {
+        $(
+            #[archmage::arcane]
+            pub(crate) fn $name(token: X64V3Token, fg: &mut [f32], bg: &[f32]) {
+                super::portable::$portable(token, fg, bg);
+            }
+        )*
+    };
+}
+
+porter_duff_v3!(
+    blend_dst_over_row_v3 => blend_dst_over_row,
+    blend_src_in_row_v3 => blend_src_in_row,
+    blend_dst_in_row_v3 => blend_dst_in_row,
+    blend_src_out_row_v3 => blend_src_out_row,
+    blend_dst_out_row_v3 => blend_dst_out_row,
+    blend_src_atop_row_v3 => blend_src_atop_row,
+    blend_dst_atop_row_v3 => blend_dst_atop_row,
+    blend_xor_row_v3 => blend_xor_row,
+);
