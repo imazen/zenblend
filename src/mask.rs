@@ -335,8 +335,11 @@ impl RoundedRectMask {
     fn fill_mask_region(&self, dst: &mut [f32], y: u32, x_start: u32, x_end: u32) {
         let h = self.height as f32;
         let yf = y as f32 + 0.5;
-        let xs = x_start as usize;
-        let xe = x_end as usize;
+        // Clamp to the buffer we were actually handed. `mask_spans` derives
+        // these bounds from `self.width`; if the caller's scratch row is
+        // shorter, a short fill is the right answer, not an OOB panic.
+        let xs = (x_start as usize).min(dst.len());
+        let xe = (x_end as usize).min(dst.len()).max(xs);
 
         // Start with opaque
         dst[xs..xe].fill(1.0);
@@ -450,18 +453,24 @@ impl MaskSource for RoundedRectMask {
                 0.0
             };
 
-            // X range affected by this corner
+            // X range affected by this corner. Clamped to `dst.len()`, not
+            // just `self.width`: the trait documents `dst.len() == width`, but
+            // a caller that passes a shorter buffer must get a short fill, not
+            // a slice-index panic.
+            let limit = dst.len();
             let (x_start, x_end) = match i {
                 0 | 3 => {
                     // Left corners: affect pixels 0..cx+x_extent
                     let start = 0usize;
-                    let end = (f32::ceil(cx + x_extent_outer) as usize).min(self.width as usize);
+                    let end = (f32::ceil(cx + x_extent_outer) as usize)
+                        .min(self.width as usize)
+                        .min(limit);
                     (start, end)
                 }
                 1 | 2 => {
                     // Right corners: affect pixels cx-x_extent..width
-                    let start = (f32::floor(cx - x_extent_outer).max(0.0)) as usize;
-                    let end = self.width as usize;
+                    let start = ((f32::floor(cx - x_extent_outer).max(0.0)) as usize).min(limit);
+                    let end = (self.width as usize).min(limit);
                     (start, end)
                 }
                 _ => continue,
@@ -510,6 +519,11 @@ impl MaskSource for RoundedRectMask {
     }
 
     fn mask_spans(&self, dst: &mut [f32], y: u32) -> MaskSpans {
+        // Same precondition `fill_mask_row` asserts — this entry point was
+        // missing it, so a short scratch row reached the region fills
+        // unchecked. Debug catches the caller's bug loudly; in release the
+        // fills clamp to `dst.len()` rather than indexing out of bounds.
+        debug_assert_eq!(dst.len(), self.width as usize);
         let h = self.height as f32;
         let w = self.width;
         let yf = y as f32 + 0.5;

@@ -297,7 +297,21 @@ pub fn apply_mask_spans(fg: &mut [f32], mask_buf: &mut [f32], mask: &dyn mask::M
         }
     }
 
+    // `align_to` widens Partial spans out to vector boundaries, absorbing a
+    // few pixels from the neighbouring Opaque/Transparent spans. Its safety
+    // argument is "expanding into Opaque territory is an identity multiply,
+    // into Transparent territory it zeroes" — but that is only true if
+    // `mask_buf` actually *holds* 1.0 / 0.0 at those pixels, and a MaskSource
+    // is entitled to leave them untouched: before alignment they sat in a
+    // uniform span that is never read. `RoundedRectMask` does exactly that —
+    // it fills only the two corner regions and leaves the opaque centre alone
+    // (see `mask_spans`), so with an odd corner extent the widened Partial
+    // span used to reach over stale scratch bytes and multiply the pixel data
+    // by them. Snapshot the pre-alignment spans and write the constants that
+    // argument assumes, so it holds for every MaskSource impl.
+    let pre = spans.clone();
     spans.align_to(mask::mask_pixel_align());
+    materialize_aligned_margins(&pre, &spans, mask_buf);
 
     for span in spans.iter() {
         let px_start = span.start as usize;
@@ -317,6 +331,45 @@ pub fn apply_mask_spans(fg: &mut [f32], mask_buf: &mut [f32], mask: &dyn mask::M
             }
             mask::SpanKind::Partial => {
                 simd::mask_row_apply(&mut fg[ch_start..ch_end], &mask_buf[px_start..px_end]);
+            }
+        }
+    }
+}
+
+/// Write the uniform mask values that [`mask::MaskSpans::align_to`]'s
+/// expansion assumes are already present.
+///
+/// A pixel that alignment moved out of an Opaque span and into a Partial one
+/// must read as `1.0`, and one moved out of a Transparent span must read as
+/// `0.0`. The mask source had no reason to write either — before alignment
+/// those pixels were in a span the applier never reads — so the values are
+/// whatever the caller's scratch buffer happened to contain (commonly zeros,
+/// or the previous row's mask, both of which corrupt the output).
+///
+/// Only the absorbed margins are touched: a post-alignment Partial span
+/// intersects a *pre*-alignment Partial span exactly where the source already
+/// filled the buffer, and those pre-spans are skipped here. Everything else in
+/// the intersection is at most `align - 1` pixels per boundary.
+fn materialize_aligned_margins(
+    pre: &mask::MaskSpans,
+    post: &mask::MaskSpans,
+    mask_buf: &mut [f32],
+) {
+    for p in post.iter() {
+        if p.kind != mask::SpanKind::Partial {
+            continue;
+        }
+        for q in pre.iter() {
+            let value = match q.kind {
+                mask::SpanKind::Opaque => 1.0,
+                mask::SpanKind::Transparent => 0.0,
+                // Already filled by the mask source — leave it alone.
+                mask::SpanKind::Partial => continue,
+            };
+            let lo = (p.start.max(q.start) as usize).min(mask_buf.len());
+            let hi = (p.end.min(q.end) as usize).min(mask_buf.len());
+            if lo < hi {
+                mask_buf[lo..hi].fill(value);
             }
         }
     }
@@ -1171,6 +1224,257 @@ mod tests {
         blend_row(&mut fg, &bg, BlendMode::ColorDodge);
         for (i, &v) in fg.iter().enumerate() {
             assert!(v.is_finite(), "channel {i} is non-finite: {v}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod align_margin_tests {
+    use super::*;
+    use crate::mask::{MaskSource, MaskSpan, MaskSpans, RoundedRectMask, SpanKind};
+
+    /// A pixel value no mask source would ever produce, so reading one proves
+    /// the applier touched a pixel nobody filled.
+    const SENTINEL: f32 = -12345.0;
+
+    /// `align_to` widens a Partial span over pixels the mask source left
+    /// untouched. This pins the repair: those pixels must read as the constant
+    /// of the span they were absorbed from.
+    ///
+    /// Arch-independent — it drives the helper directly rather than going
+    /// through `mask_pixel_align()`, which is 1 on non-x86_64 and makes
+    /// `align_to` an early-return there.
+    #[test]
+    fn aligned_margins_get_the_constant_of_the_span_they_came_from() {
+        // The shape `RoundedRectMask` emits for a row with an *odd* corner
+        // extent: [Partial 0..7] [Opaque 7..193] [Partial 193..200].
+        let mut pre = MaskSpans::new();
+        pre.push(MaskSpan {
+            start: 0,
+            end: 7,
+            kind: SpanKind::Partial,
+        });
+        pre.push(MaskSpan {
+            start: 7,
+            end: 193,
+            kind: SpanKind::Opaque,
+        });
+        pre.push(MaskSpan {
+            start: 193,
+            end: 200,
+            kind: SpanKind::Partial,
+        });
+
+        // Only the two corner regions are filled; the opaque centre is
+        // whatever the caller's scratch buffer held.
+        let mut buf = vec![SENTINEL; 200];
+        for v in buf[0..7].iter_mut() {
+            *v = 0.25;
+        }
+        for v in buf[193..200].iter_mut() {
+            *v = 0.75;
+        }
+
+        let mut post = pre.clone();
+        post.align_to(2);
+        materialize_aligned_margins(&pre, &post, &mut buf);
+
+        for s in post.iter() {
+            if s.kind != SpanKind::Partial {
+                continue;
+            }
+            for (off, &v) in buf[s.start as usize..s.end as usize].iter().enumerate() {
+                let x = s.start as usize + off;
+                assert_ne!(
+                    v, SENTINEL,
+                    "aligned Partial span {s:?} still reads unwritten pixel {x}"
+                );
+            }
+        }
+        // Pixel 7 was absorbed out of the Opaque span: it must be an identity
+        // multiply, which is exactly what `align_to`'s doc promises.
+        assert_eq!(buf[7], 1.0, "margin absorbed from Opaque must read 1.0");
+        // The source-filled pixels are untouched.
+        assert_eq!(buf[0], 0.25);
+        assert_eq!(buf[6], 0.25);
+        assert_eq!(buf[199], 0.75);
+    }
+
+    /// The Transparent half of the same argument.
+    #[test]
+    fn aligned_margins_absorbed_from_transparent_read_zero() {
+        let mut pre = MaskSpans::new();
+        pre.push(MaskSpan {
+            start: 0,
+            end: 5,
+            kind: SpanKind::Transparent,
+        });
+        pre.push(MaskSpan {
+            start: 5,
+            end: 11,
+            kind: SpanKind::Partial,
+        });
+        pre.push(MaskSpan {
+            start: 11,
+            end: 16,
+            kind: SpanKind::Transparent,
+        });
+
+        let mut buf = vec![SENTINEL; 16];
+        for v in buf[5..11].iter_mut() {
+            *v = 0.5;
+        }
+
+        let mut post = pre.clone();
+        post.align_to(2);
+        materialize_aligned_margins(&pre, &post, &mut buf);
+
+        for s in post.iter() {
+            if s.kind != SpanKind::Partial {
+                continue;
+            }
+            for (off, &v) in buf[s.start as usize..s.end as usize].iter().enumerate() {
+                let x = s.start as usize + off;
+                assert_ne!(
+                    v, SENTINEL,
+                    "aligned Partial span {s:?} still reads unwritten pixel {x}"
+                );
+            }
+        }
+        // 11 was absorbed out of a Transparent span → must zero the pixel.
+        assert_eq!(
+            buf[11], 0.0,
+            "margin absorbed from Transparent must read 0.0"
+        );
+    }
+
+    /// The real generator, at odd radii, driven through the exact sequence
+    /// `apply_mask_spans` uses — but with the alignment pinned to 2 instead of
+    /// `mask_pixel_align()`, so this fires on every target, not just x86_64.
+    ///
+    /// `RoundedRectMask::mask_spans` fills only the two corner regions and
+    /// leaves the opaque centre untouched. An odd corner extent puts the
+    /// Partial/Opaque boundary on an odd column, so a 2-pixel alignment pulls
+    /// an unwritten pixel into the Partial span. Poisoning the buffer makes
+    /// that read observable.
+    #[test]
+    fn real_mask_odd_radii_never_leave_an_unwritten_pixel_in_a_partial_span() {
+        let mut checked_any = false;
+        for radius in [5.0f32, 7.0, 9.0, 11.0, 13.0, 15.0, 21.0, 23.0] {
+            let mask = RoundedRectMask::uniform(200, 200, radius);
+            for y in 0..200u32 {
+                let mut buf = vec![SENTINEL; 200];
+                let pre = mask.mask_spans(&mut buf, y);
+                let mut post = pre.clone();
+                post.align_to(2);
+                materialize_aligned_margins(&pre, &post, &mut buf);
+
+                for s in post.iter() {
+                    if s.kind != SpanKind::Partial {
+                        continue;
+                    }
+                    for (off, &v) in buf[s.start as usize..s.end as usize].iter().enumerate() {
+                        let x = s.start as usize + off;
+                        checked_any = true;
+                        assert_ne!(
+                            v, SENTINEL,
+                            "radius {radius} y={y}: aligned Partial span {s:?} reads pixel {x}, \
+                             which mask_spans never wrote"
+                        );
+                    }
+                }
+            }
+        }
+        assert!(checked_any, "test never inspected a Partial span");
+    }
+
+    /// End-to-end: `apply_mask_spans` must agree with the naive
+    /// fill-then-multiply path for **odd** corner radii, with the scratch
+    /// buffer poisoned so any pixel the applier reads without filling shows up.
+    ///
+    /// All three pre-existing `align_*` tests use even radii (40.0) and a
+    /// zeroed scratch, so `align_to` either did not move a boundary or moved it
+    /// onto a pixel that happened to read 0.0. Odd radii put the corner extent
+    /// on an odd column, which is what makes the 2-pixel x86_64 alignment
+    /// expand across it.
+    ///
+    /// Note this assertion only *fires* on x86_64: `mask_pixel_align()` is 1
+    /// elsewhere and `align_to` early-returns, so on other targets it passes
+    /// whether or not the margins are materialized. The two helper tests above
+    /// carry the invariant on every target.
+    #[test]
+    fn apply_mask_spans_matches_naive_for_odd_radii() {
+        for radius in [5.0f32, 7.0, 9.0, 11.0, 13.0, 15.0, 21.0] {
+            let mask = RoundedRectMask::uniform(200, 200, radius);
+            for y in [0, 1, 2, 3, 5, 8, 13, 20, 100, 179, 186, 194, 197, 199] {
+                let mut pixels_naive = vec![0.7f32; 800];
+                let mut buf_naive = vec![SENTINEL; 200];
+                match mask.fill_mask_row(&mut buf_naive, y) {
+                    mask::MaskFill::AllOpaque => {}
+                    mask::MaskFill::AllTransparent => pixels_naive.fill(0.0),
+                    mask::MaskFill::Partial => crate::mask_row(&mut pixels_naive, &buf_naive),
+                }
+
+                let mut pixels_spans = vec![0.7f32; 800];
+                // Poisoned scratch: the span path must never read a pixel it
+                // did not fill.
+                let mut buf_spans = vec![SENTINEL; 200];
+                crate::apply_mask_spans(&mut pixels_spans, &mut buf_spans, &mask, y);
+
+                for (i, (a, b)) in pixels_naive.iter().zip(pixels_spans.iter()).enumerate() {
+                    assert!(
+                        (a - b).abs() < 1e-6,
+                        "radius {radius} y={y} i={i}: naive={a}, spans={b}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod plus_clamp_tests {
+    use super::*;
+
+    /// `BlendMode::Plus` documents `clamp(S + D, 0, 1)`. The implementation
+    /// only applied the upper bound, so a negative sum — reachable with the
+    /// out-of-gamut f32 rows this crate accepts — passed through unclamped.
+    #[test]
+    fn plus_clamps_below_zero() {
+        // Odd pixel count so any future SIMD port's scalar tail is exercised.
+        let mut fg = vec![
+            -0.5, -1.0, 0.25, 0.5, // sums go negative
+            -2.0, 0.1, -0.1, 0.2, //
+            0.9, 0.9, 0.9, 0.9, // sum exceeds 1 → upper clamp still applies
+        ];
+        let bg = vec![
+            -0.25, 0.5, 0.25, 0.25, //
+            0.5, -0.4, 0.0, 0.1, //
+            0.9, 0.9, 0.9, 0.9, //
+        ];
+        blend_row(&mut fg, &bg, BlendMode::Plus);
+        for (i, &v) in fg.iter().enumerate() {
+            assert!(
+                (0.0..=1.0).contains(&v),
+                "channel {i} left the documented [0,1] range: {v}"
+            );
+        }
+        // Upper clamp unchanged.
+        assert_eq!(fg[8], 1.0);
+        // Lower clamp now applied: -0.5 + -0.25 = -0.75 → 0.0.
+        assert_eq!(fg[0], 0.0);
+    }
+
+    /// Same contract on the solid-pixel dispatch path.
+    #[test]
+    fn plus_solid_clamps_below_zero() {
+        let mut fg = vec![-0.5, -1.0, 0.25, 0.5];
+        blend_row_solid(&mut fg, &[-0.25, 0.5, 0.25, 0.25], BlendMode::Plus);
+        for (i, &v) in fg.iter().enumerate() {
+            assert!(
+                (0.0..=1.0).contains(&v),
+                "channel {i} left the documented [0,1] range: {v}"
+            );
         }
     }
 }

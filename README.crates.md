@@ -202,8 +202,13 @@ apply_mask_spans(&mut row, &mut mask_buf, &mask, 0);
 Built-in masks: `RoundedRectMask` (`new` with per-corner radii, `circle`, `uniform`),
 `LinearGradientMask`, `RadialGradientMask`. Implement the `MaskSource` trait for custom
 masks. `apply_mask_spans` validates the spans a `MaskSource` returns (coverage, ordering,
-in-range bounds) and falls back to a full-row fill if they're malformed, so a buggy or
-hostile `MaskSource` can't panic via an out-of-bounds slice.
+in-range bounds) and falls back to a full-row fill if they're malformed, so malformed
+spans can't turn into an out-of-bounds slice index inside `apply_mask_spans`.
+
+That guarantee covers the spans, not the impl's own row fill: `MaskSource` is handed
+`&mut [f32]` and writes it directly, so an impl is responsible for staying inside the
+buffer it is given. The trait's precondition is `dst.len() == width`; the built-in masks
+`debug_assert` it and clamp their writes to `dst.len()` in release.
 
 ### Interpolation
 

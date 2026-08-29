@@ -479,20 +479,24 @@ fn blend_plus(fg: &mut [f32], bg: &[f32]) {
         .iter_mut()
         .zip(bg.as_chunks::<4>().0)
     {
-        s[0] = (s[0] + b[0]).min(1.0);
-        s[1] = (s[1] + b[1]).min(1.0);
-        s[2] = (s[2] + b[2]).min(1.0);
-        s[3] = (s[3] + b[3]).min(1.0);
+        // `clamp`, not `min`: BlendMode::Plus documents `clamp(S + D, 0, 1)`.
+        // Valid premultiplied input can't sum below zero, but this crate takes
+        // f32 rows that may carry out-of-gamut negatives, and those were
+        // passing straight through the documented floor.
+        s[0] = (s[0] + b[0]).clamp(0.0, 1.0);
+        s[1] = (s[1] + b[1]).clamp(0.0, 1.0);
+        s[2] = (s[2] + b[2]).clamp(0.0, 1.0);
+        s[3] = (s[3] + b[3]).clamp(0.0, 1.0);
     }
 }
 
 /// Plus single pixel (for solid-pixel dispatch path).
 #[inline]
 fn blend_plus_pixel(fg: &mut [f32; 4], bg: &[f32; 4]) {
-    fg[0] = (fg[0] + bg[0]).min(1.0);
-    fg[1] = (fg[1] + bg[1]).min(1.0);
-    fg[2] = (fg[2] + bg[2]).min(1.0);
-    fg[3] = (fg[3] + bg[3]).min(1.0);
+    fg[0] = (fg[0] + bg[0]).clamp(0.0, 1.0);
+    fg[1] = (fg[1] + bg[1]).clamp(0.0, 1.0);
+    fg[2] = (fg[2] + bg[2]).clamp(0.0, 1.0);
+    fg[3] = (fg[3] + bg[3]).clamp(0.0, 1.0);
 }
 
 #[cfg(test)]
