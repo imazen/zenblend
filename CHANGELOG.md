@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `zenutils-apidoc` 0.1.0 → 0.1.1 in the workspace-excluded, CI-free apidoc
+  runner. Audited against the crates.io API, every other requirement in this
+  crate is already current: `safe_unaligned_simd` 0.2.5 is the latest release,
+  and the `archmage` / `magetypes` 0.9.16 floors are zen-family requirements
+  left deliberately untouched (both resolve to 0.9.28). There are no
+  dev-dependencies. Nothing in the library's dependency graph moves, so there
+  is no blend output to re-hash. Test suite unchanged at 4 suites / 108 passed
+  / 0 failed.
+
 ### Fixed
 - **`apply_mask_spans` no longer multiplies pixel data by mask values nobody wrote.** `MaskSpans::align_to` widens Partial spans out to the SIMD block size, absorbing a few pixels from the neighbouring Opaque/Transparent spans, and justifies it with "expanding into Opaque territory is an identity multiply, into Transparent it zeroes". That holds only if the mask buffer *contains* 1.0 / 0.0 at those pixels — and `RoundedRectMask::mask_spans` deliberately fills only the two corner regions, leaving the opaque centre untouched because before alignment it is never read. With an odd corner extent the widened span reached across that boundary and multiplied by whatever the caller's scratch row held (commonly 0.0 from a fresh `vec![]`, which blanks the pixel, or the previous row's mask when the buffer is reused). `apply_mask_spans` now snapshots the pre-alignment spans and writes the constants the argument assumes, so it is true for every `MaskSource` impl rather than only those that fill the whole row. Reachable on x86_64 only (`mask_pixel_align()` is 2 there, 1 elsewhere, and `align_to` early-returns at 1) and for **odd** corner radii — all three pre-existing `align_*` tests use radius 40.0, which made `align_to` a no-op in every one of them.
 - `BlendMode::Plus` now applies the lower half of the `clamp(S + D, 0, 1)` it documents; it was `min(1.0)` only, so a negative sum from an out-of-gamut input passed through unclamped.
