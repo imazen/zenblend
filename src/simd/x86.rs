@@ -27,11 +27,28 @@ pub(crate) fn blend_src_over_row_v3(token: X64V3Token, fg: &mut [f32], bg: &[f32
         let inv_alpha = ones - alpha;
 
         // out = fg + bg * inv_alpha
+        //
+        // NOTE (unresolved, 2026-08-29): this is a *fused* multiply-add — one
+        // rounding — while both the scalar tail below and the portable
+        // `blend_src_over_row` in `simd/portable.rs` compute
+        // `fg + bg * inv_alpha` with two roundings. So this kernel can differ
+        // from its own tail by up to 1 ULP on the last pixel of an odd-length
+        // row, and from the NEON/WASM/scalar backends everywhere.
+        //
+        // That is why `SrcOver` is the one row kernel absent from
+        // `blend.rs::porter_duff_simd_matches_scalar_bit_for_bit` — adding it
+        // would fail on x86_64 today. Resolving it means picking one side
+        // (fuse the tail and the portable kernel too, or drop the fusion here)
+        // and is a cross-backend numerics decision with a perf cost either
+        // way, so it is deliberately not changed as a drive-by. Whoever takes
+        // it: make the tail match the body first, since a function disagreeing
+        // with itself is the half that has no upside.
         let result = bg_vec.mul_add(inv_alpha, fg_vec);
         result.store(fg_chunk);
     }
 
-    // Scalar tail for remaining pixels (0 or 1 pixel)
+    // Scalar tail for remaining pixels (0 or 1 pixel). Unfused — see the NOTE
+    // above; this does not match the FMA in the body bit-for-bit.
     let done = fg_chunks.len() * 8;
     let remaining_fg = &mut fg[done..];
     let remaining_bg = &bg[done..];

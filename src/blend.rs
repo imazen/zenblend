@@ -745,6 +745,15 @@ mod porter_duff_simd_gate {
         }
     }
 
+    /// Bit-exact gate for the eight alpha-weighted Porter-Duff row kernels.
+    ///
+    /// `SrcOver` is deliberately **absent**: its x86_64 kernel
+    /// (`simd::x86::blend_src_over_row_v3`) uses a fused multiply-add while
+    /// its own scalar tail and the portable `f32x4` kernel do not, so it is
+    /// not bit-exact against a two-rounding scalar reference on x86_64 — nor
+    /// against itself on the last pixel of an odd-length row. See the NOTE at
+    /// that kernel. Adding `SrcOver` to this roster is the right end state,
+    /// but it has to follow the numerics decision, not precede it.
     #[test]
     fn porter_duff_simd_matches_scalar_bit_for_bit() {
         let cases: [(&str, Row, Row); 8] = [
