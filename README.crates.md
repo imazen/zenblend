@@ -2,7 +2,7 @@
 
 # zenblend
 
-zenblend is a row-level pixel blending library for premultiplied linear f32 RGBA compositing pipelines: 32 Porter-Duff and artistic blend modes, masking, and interpolation. Pure Rust, `#![forbid(unsafe_code)]`, allocation-free, and SIMD-accelerated via runtime CPU dispatch.
+zenblend is a row-level pixel blending library for premultiplied linear f32 RGBA compositing pipelines: 32 Porter-Duff (Thomas Porter, Tom Duff) and artistic blend modes, masking, and interpolation. Pure Rust, `#![forbid(unsafe_code)]`, allocation-free, and SIMD-accelerated via runtime CPU dispatch.
 
 All operations work on `&mut [f32]` slices -- 4 interleaved floats per pixel, alpha pre-applied, in linear light. Designed as the inner loop for [zenpipe](https://github.com/imazen/zenpipe) strip pipelines, not a standalone compositing engine.
 
