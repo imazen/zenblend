@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Dependency compatibility
+
+- Admit the current SIMD beta and use equivalent token-explicit SIMD constructors (`0343372b`). Strict library lint and the existing library tests pass; arithmetic and expectations are unchanged.
+
 ### Changed
 
 - `zenutils-apidoc` 0.1.0 → 0.1.1 in the workspace-excluded, CI-free apidoc
