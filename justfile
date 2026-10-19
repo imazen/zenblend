@@ -45,3 +45,9 @@ ci: fmt clippy clippy-x86 feature-check test test-nostd
 # Run benchmarks
 bench *ARGS:
     cargo bench {{ARGS}}
+
+# Validate stable compatibility while tool builds select the current SIMD beta.
+beta-cohort-check:
+    cargo fmt --check
+    cargo clippy --locked --lib -- -D warnings
+    cargo test --locked --lib

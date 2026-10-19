@@ -12,18 +12,18 @@ use magetypes::simd::f32x8;
 /// Uses FMA: `out = fg + bg * (1 - alpha)`.
 #[archmage::arcane]
 pub(crate) fn blend_src_over_row_v3(token: X64V3Token, fg: &mut [f32], bg: &[f32]) {
-    let ones = f32x8::splat(token, 1.0);
+    let ones = f32x8::splat_t(token, 1.0);
 
     let (fg_chunks, _) = fg.as_chunks_mut::<8>();
     let (bg_chunks, _) = bg.as_chunks::<8>();
 
     for (fg_chunk, bg_chunk) in fg_chunks.iter_mut().zip(bg_chunks.iter()) {
-        let fg_vec = f32x8::load(token, fg_chunk);
-        let bg_vec = f32x8::load(token, bg_chunk);
+        let fg_vec = f32x8::load_t(token, fg_chunk);
+        let bg_vec = f32x8::load_t(token, bg_chunk);
 
         // Broadcast alpha within each pixel's 4 lanes using vshufps.
         // _MM_SHUFFLE(3,3,3,3) = 0xFF broadcasts lane 3 within each 128-bit half.
-        let alpha = f32x8::from_m256(token, _mm256_shuffle_ps::<0xFF>(fg_vec.raw(), fg_vec.raw()));
+        let alpha = f32x8::from_raw_t(token, _mm256_shuffle_ps::<0xFF>(fg_vec.raw(), fg_vec.raw()));
         let inv_alpha = ones - alpha;
 
         // out = fg + bg * inv_alpha
@@ -71,9 +71,9 @@ pub(crate) fn blend_src_over_row_v3(token: X64V3Token, fg: &mut [f32], bg: &[f32
 /// Broadcasts the solid pixel into both halves of a 256-bit register.
 #[archmage::arcane]
 pub(crate) fn blend_src_over_solid_v3(token: X64V3Token, fg: &mut [f32], pixel: &[f32; 4]) {
-    let ones = f32x8::splat(token, 1.0);
+    let ones = f32x8::splat_t(token, 1.0);
     // Broadcast pixel into both 128-bit halves: [R,G,B,A,R,G,B,A]
-    let px = f32x8::from_array(
+    let px = f32x8::from_array_t(
         token,
         [
             pixel[0], pixel[1], pixel[2], pixel[3], pixel[0], pixel[1], pixel[2], pixel[3],
@@ -83,8 +83,8 @@ pub(crate) fn blend_src_over_solid_v3(token: X64V3Token, fg: &mut [f32], pixel: 
     let (fg_chunks, _) = fg.as_chunks_mut::<8>();
 
     for fg_chunk in fg_chunks.iter_mut() {
-        let fg_vec = f32x8::load(token, fg_chunk);
-        let alpha = f32x8::from_m256(token, _mm256_shuffle_ps::<0xFF>(fg_vec.raw(), fg_vec.raw()));
+        let fg_vec = f32x8::load_t(token, fg_chunk);
+        let alpha = f32x8::from_raw_t(token, _mm256_shuffle_ps::<0xFF>(fg_vec.raw(), fg_vec.raw()));
         let inv_alpha = ones - alpha;
         let result = px.mul_add(inv_alpha, fg_vec);
         result.store(fg_chunk);
@@ -107,22 +107,22 @@ pub(crate) fn blend_src_over_solid_v3(token: X64V3Token, fg: &mut [f32], pixel: 
 /// Same as solid but forces output alpha to 1.0.
 #[archmage::arcane]
 pub(crate) fn blend_src_over_solid_opaque_v3(token: X64V3Token, fg: &mut [f32], pixel: &[f32; 4]) {
-    let ones = f32x8::splat(token, 1.0);
-    let px = f32x8::from_array(
+    let ones = f32x8::splat_t(token, 1.0);
+    let px = f32x8::from_array_t(
         token,
         [
             pixel[0], pixel[1], pixel[2], pixel[3], pixel[0], pixel[1], pixel[2], pixel[3],
         ],
     );
     // Mask to force alpha lanes to 1.0: [0,0,0,1, 0,0,0,1]
-    let alpha_mask = f32x8::from_array(token, [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]);
-    let alpha_blend = f32x8::from_array(token, [1.0, 1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 0.0]);
+    let alpha_mask = f32x8::from_array_t(token, [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]);
+    let alpha_blend = f32x8::from_array_t(token, [1.0, 1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 0.0]);
 
     let (fg_chunks, _) = fg.as_chunks_mut::<8>();
 
     for fg_chunk in fg_chunks.iter_mut() {
-        let fg_vec = f32x8::load(token, fg_chunk);
-        let alpha = f32x8::from_m256(token, _mm256_shuffle_ps::<0xFF>(fg_vec.raw(), fg_vec.raw()));
+        let fg_vec = f32x8::load_t(token, fg_chunk);
+        let alpha = f32x8::from_raw_t(token, _mm256_shuffle_ps::<0xFF>(fg_vec.raw(), fg_vec.raw()));
         let inv_alpha = ones - alpha;
         let blended = px.mul_add(inv_alpha, fg_vec);
         // Force alpha to 1.0: result = blended * alpha_blend + alpha_mask
@@ -152,9 +152,9 @@ pub(crate) fn mask_row_apply_v3(token: X64V3Token, fg: &mut [f32], mask: &[f32])
     let (mask_chunks, _) = mask.as_chunks::<2>();
 
     for (fg_chunk, mask_pair) in fg_chunks.iter_mut().zip(mask_chunks.iter()) {
-        let fg_vec = f32x8::load(token, fg_chunk);
+        let fg_vec = f32x8::load_t(token, fg_chunk);
         // Broadcast mask[0] to lanes 0-3, mask[1] to lanes 4-7
-        let mask_vec = f32x8::from_array(
+        let mask_vec = f32x8::from_array_t(
             token,
             [
                 mask_pair[0],
@@ -195,15 +195,15 @@ pub(crate) fn mask_row_apply_v3(token: X64V3Token, fg: &mut [f32], mask: &[f32])
 #[archmage::arcane]
 pub(crate) fn mask_row_rgb_apply_v3(token: X64V3Token, fg: &mut [f32], mask: &[f32]) {
     // Blend mask: [1,1,1,0, 1,1,1,0] — select from result for RGB, from original for A
-    let blend_select = f32x8::from_array(token, [1.0, 1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 0.0]);
-    let alpha_select = f32x8::from_array(token, [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]);
+    let blend_select = f32x8::from_array_t(token, [1.0, 1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 0.0]);
+    let alpha_select = f32x8::from_array_t(token, [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]);
 
     let (fg_chunks, _) = fg.as_chunks_mut::<8>();
     let (mask_chunks, _) = mask.as_chunks::<2>();
 
     for (fg_chunk, mask_pair) in fg_chunks.iter_mut().zip(mask_chunks.iter()) {
-        let fg_vec = f32x8::load(token, fg_chunk);
-        let mask_vec = f32x8::from_array(
+        let fg_vec = f32x8::load_t(token, fg_chunk);
+        let mask_vec = f32x8::from_array_t(
             token,
             [
                 mask_pair[0],
@@ -261,9 +261,9 @@ pub(crate) fn lerp_row_apply_v3(
         .zip(t_chunks.iter())
         .zip(out_chunks.iter_mut())
     {
-        let a_vec = f32x8::load(token, a_chunk);
-        let b_vec = f32x8::load(token, b_chunk);
-        let t_vec = f32x8::from_array(
+        let a_vec = f32x8::load_t(token, a_chunk);
+        let b_vec = f32x8::load_t(token, b_chunk);
+        let t_vec = f32x8::from_array_t(
             token,
             [
                 t_pair[0], t_pair[0], t_pair[0], t_pair[0], t_pair[1], t_pair[1], t_pair[1],

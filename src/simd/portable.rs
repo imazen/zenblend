@@ -10,13 +10,13 @@ use magetypes::simd::generic::f32x4;
 /// SrcOver row blend using magetypes f32x4 (1 pixel per iteration).
 #[inline]
 pub(super) fn blend_src_over_row<T: F32x4Backend>(token: T, fg: &mut [f32], bg: &[f32]) {
-    let (fg_chunks, _) = f32x4::<T>::partition_slice_mut(token, fg);
-    let (bg_chunks, _) = f32x4::<T>::partition_slice(token, bg);
+    let (fg_chunks, _) = f32x4::<T>::partition_slice_mut_t(token, fg);
+    let (bg_chunks, _) = f32x4::<T>::partition_slice_t(token, bg);
 
     for (fg_chunk, bg_chunk) in fg_chunks.iter_mut().zip(bg_chunks.iter()) {
-        let fg_pixel = f32x4::load(token, fg_chunk);
-        let bg_pixel = f32x4::load(token, bg_chunk);
-        let inv_alpha = f32x4::splat(token, 1.0 - fg_chunk[3]);
+        let fg_pixel = f32x4::load_t(token, fg_chunk);
+        let bg_pixel = f32x4::load_t(token, bg_chunk);
+        let inv_alpha = f32x4::splat_t(token, 1.0 - fg_chunk[3]);
         let result = fg_pixel + bg_pixel * inv_alpha;
         result.store(fg_chunk);
     }
@@ -35,14 +35,14 @@ pub(super) fn blend_src_over_row<T: F32x4Backend>(token: T, fg: &mut [f32], bg: 
 /// same scalar code because there is no SIMD arm to select."
 #[inline]
 pub(super) fn blend_dst_over_row<T: F32x4Backend>(token: T, fg: &mut [f32], bg: &[f32]) {
-    let (fg_chunks, _) = f32x4::<T>::partition_slice_mut(token, fg);
-    let (bg_chunks, _) = f32x4::<T>::partition_slice(token, bg);
+    let (fg_chunks, _) = f32x4::<T>::partition_slice_mut_t(token, fg);
+    let (bg_chunks, _) = f32x4::<T>::partition_slice_t(token, bg);
 
     for (fg_chunk, bg_chunk) in fg_chunks.iter_mut().zip(bg_chunks.iter()) {
-        let fg_pixel = f32x4::load(token, fg_chunk);
-        let bg_pixel = f32x4::load(token, bg_chunk);
+        let fg_pixel = f32x4::load_t(token, fg_chunk);
+        let bg_pixel = f32x4::load_t(token, bg_chunk);
         // Note the asymmetry with SrcOver: the surviving alpha is the BG's.
-        let inv_da = f32x4::splat(token, 1.0 - bg_chunk[3]);
+        let inv_da = f32x4::splat_t(token, 1.0 - bg_chunk[3]);
         let result = bg_pixel + fg_pixel * inv_da;
         result.store(fg_chunk);
     }
@@ -64,13 +64,13 @@ macro_rules! porter_duff_row {
         #[doc = $doc]
         #[inline]
         pub(super) fn $name<T: F32x4Backend>(token: T, fg: &mut [f32], bg: &[f32]) {
-            let (fg_chunks, _) = f32x4::<T>::partition_slice_mut(token, fg);
-            let (bg_chunks, _) = f32x4::<T>::partition_slice(token, bg);
+            let (fg_chunks, _) = f32x4::<T>::partition_slice_mut_t(token, fg);
+            let (bg_chunks, _) = f32x4::<T>::partition_slice_t(token, bg);
             for (fg_chunk, bg_chunk) in fg_chunks.iter_mut().zip(bg_chunks.iter()) {
-                let sa = f32x4::splat(token, fg_chunk[3]);
-                let da = f32x4::splat(token, bg_chunk[3]);
-                let f = f32x4::load(token, fg_chunk);
-                let b = f32x4::load(token, bg_chunk);
+                let sa = f32x4::splat_t(token, fg_chunk[3]);
+                let da = f32x4::splat_t(token, bg_chunk[3]);
+                let f = f32x4::load_t(token, fg_chunk);
+                let b = f32x4::load_t(token, bg_chunk);
                 let out: f32x4<T> = $body(token, f, b, sa, da);
                 out.store(fg_chunk);
             }
@@ -97,30 +97,32 @@ porter_duff_row!(
 porter_duff_row!(
     blend_src_out_row,
     "SrcOut: `fg * (1 - da)`.",
-    |t: T, f: f32x4<T>, _b: f32x4<T>, _sa: f32x4<T>, da: f32x4<T>| f * (f32x4::splat(t, 1.0) - da)
+    |t: T, f: f32x4<T>, _b: f32x4<T>, _sa: f32x4<T>, da: f32x4<T>| f
+        * (f32x4::splat_t(t, 1.0) - da)
 );
 porter_duff_row!(
     blend_dst_out_row,
     "DstOut: `bg * (1 - sa)`.",
-    |t: T, _f: f32x4<T>, b: f32x4<T>, sa: f32x4<T>, _da: f32x4<T>| b * (f32x4::splat(t, 1.0) - sa)
+    |t: T, _f: f32x4<T>, b: f32x4<T>, sa: f32x4<T>, _da: f32x4<T>| b
+        * (f32x4::splat_t(t, 1.0) - sa)
 );
 porter_duff_row!(
     blend_src_atop_row,
     "SrcAtop: `fg*da + bg*(1 - sa)`.",
     |t: T, f: f32x4<T>, b: f32x4<T>, sa: f32x4<T>, da: f32x4<T>| f * da
-        + b * (f32x4::splat(t, 1.0) - sa)
+        + b * (f32x4::splat_t(t, 1.0) - sa)
 );
 porter_duff_row!(
     blend_dst_atop_row,
     "DstAtop: `bg*sa + fg*(1 - da)`.",
     |t: T, f: f32x4<T>, b: f32x4<T>, sa: f32x4<T>, da: f32x4<T>| b * sa
-        + f * (f32x4::splat(t, 1.0) - da)
+        + f * (f32x4::splat_t(t, 1.0) - da)
 );
 porter_duff_row!(
     blend_xor_row,
     "Xor: `fg*(1 - da) + bg*(1 - sa)`.",
     |t: T, f: f32x4<T>, b: f32x4<T>, sa: f32x4<T>, da: f32x4<T>| {
-        let one = f32x4::splat(t, 1.0);
+        let one = f32x4::splat_t(t, 1.0);
         f * (one - da) + b * (one - sa)
     }
 );
@@ -128,12 +130,12 @@ porter_duff_row!(
 /// SrcOver solid pixel blend using magetypes f32x4.
 #[inline]
 pub(super) fn blend_src_over_solid<T: F32x4Backend>(token: T, fg: &mut [f32], pixel: &[f32; 4]) {
-    let px = f32x4::load(token, pixel);
-    let (fg_chunks, _) = f32x4::<T>::partition_slice_mut(token, fg);
+    let px = f32x4::load_t(token, pixel);
+    let (fg_chunks, _) = f32x4::<T>::partition_slice_mut_t(token, fg);
 
     for fg_chunk in fg_chunks.iter_mut() {
-        let fg_pixel = f32x4::load(token, fg_chunk);
-        let inv_alpha = f32x4::splat(token, 1.0 - fg_chunk[3]);
+        let fg_pixel = f32x4::load_t(token, fg_chunk);
+        let inv_alpha = f32x4::splat_t(token, 1.0 - fg_chunk[3]);
         let result = fg_pixel + px * inv_alpha;
         result.store(fg_chunk);
     }
@@ -146,12 +148,12 @@ pub(super) fn blend_src_over_solid_opaque<T: F32x4Backend>(
     fg: &mut [f32],
     pixel: &[f32; 4],
 ) {
-    let px = f32x4::load(token, pixel);
-    let (fg_chunks, _) = f32x4::<T>::partition_slice_mut(token, fg);
+    let px = f32x4::load_t(token, pixel);
+    let (fg_chunks, _) = f32x4::<T>::partition_slice_mut_t(token, fg);
 
     for fg_chunk in fg_chunks.iter_mut() {
-        let fg_pixel = f32x4::load(token, fg_chunk);
-        let inv_alpha = f32x4::splat(token, 1.0 - fg_chunk[3]);
+        let fg_pixel = f32x4::load_t(token, fg_chunk);
+        let inv_alpha = f32x4::splat_t(token, 1.0 - fg_chunk[3]);
         let result = fg_pixel + px * inv_alpha;
         let mut arr = result.to_array();
         arr[3] = 1.0;
@@ -162,11 +164,11 @@ pub(super) fn blend_src_over_solid_opaque<T: F32x4Backend>(
 /// Per-pixel mask multiply using magetypes f32x4.
 #[inline]
 pub(super) fn mask_row_apply<T: F32x4Backend>(token: T, fg: &mut [f32], mask: &[f32]) {
-    let (fg_chunks, _) = f32x4::<T>::partition_slice_mut(token, fg);
+    let (fg_chunks, _) = f32x4::<T>::partition_slice_mut_t(token, fg);
 
     for (fg_chunk, &m) in fg_chunks.iter_mut().zip(mask.iter()) {
-        let fg_pixel = f32x4::load(token, fg_chunk);
-        let mask_vec = f32x4::splat(token, m);
+        let fg_pixel = f32x4::load_t(token, fg_chunk);
+        let mask_vec = f32x4::splat_t(token, m);
         let result = fg_pixel * mask_vec;
         result.store(fg_chunk);
     }
@@ -175,11 +177,11 @@ pub(super) fn mask_row_apply<T: F32x4Backend>(token: T, fg: &mut [f32], mask: &[
 /// Per-pixel mask multiply on RGB only, alpha untouched, magetypes f32x4.
 #[inline]
 pub(super) fn mask_row_rgb_apply<T: F32x4Backend>(token: T, fg: &mut [f32], mask: &[f32]) {
-    let (fg_chunks, _) = f32x4::<T>::partition_slice_mut(token, fg);
+    let (fg_chunks, _) = f32x4::<T>::partition_slice_mut_t(token, fg);
 
     for (fg_chunk, &m) in fg_chunks.iter_mut().zip(mask.iter()) {
-        let fg_pixel = f32x4::load(token, fg_chunk);
-        let mask_vec = f32x4::from_array(token, [m, m, m, 1.0]);
+        let fg_pixel = f32x4::load_t(token, fg_chunk);
+        let mask_vec = f32x4::from_array_t(token, [m, m, m, 1.0]);
         let result = fg_pixel * mask_vec;
         result.store(fg_chunk);
     }
@@ -228,8 +230,8 @@ where
     T: F32x4Backend,
     F: Fn(T, f32x4<T>, f32x4<T>, f32x4<T>, f32, f32) -> f32x4<T>,
 {
-    let (fg_chunks, _) = f32x4::<T>::partition_slice_mut(token, fg);
-    let (bg_chunks, _) = f32x4::<T>::partition_slice(token, bg);
+    let (fg_chunks, _) = f32x4::<T>::partition_slice_mut_t(token, fg);
+    let (bg_chunks, _) = f32x4::<T>::partition_slice_t(token, bg);
 
     for (fg_chunk, bg_chunk) in fg_chunks.iter_mut().zip(bg_chunks.iter()) {
         let sa = fg_chunk[3];
@@ -241,10 +243,10 @@ where
             continue;
         }
 
-        let fg_v = f32x4::load(token, fg_chunk);
-        let bg_v = f32x4::load(token, bg_chunk);
+        let fg_v = f32x4::load_t(token, fg_chunk);
+        let bg_v = f32x4::load_t(token, bg_chunk);
         // base = (1-da)·fg + (1-sa)·bg  (same operation order as scalar reference)
-        let base = fg_v * f32x4::splat(token, 1.0 - da) + bg_v * f32x4::splat(token, 1.0 - sa);
+        let base = fg_v * f32x4::splat_t(token, 1.0 - da) + bg_v * f32x4::splat_t(token, 1.0 - sa);
 
         let out = combine(token, fg_v, bg_v, base, sa, da);
 
@@ -252,15 +254,15 @@ where
         // per-channel `is_finite` guard): `abs(x) < +inf` is false for both NaN
         // (abs(NaN) is NaN; NaN < inf is false) and ±inf — so one masked select
         // zeroes any non-finite lane. Avoids a per-pixel scalar branch loop.
-        let inf = f32x4::splat(token, f32::INFINITY);
-        let zero = f32x4::splat(token, 0.0);
+        let inf = f32x4::splat_t(token, f32::INFINITY);
+        let zero = f32x4::splat_t(token, 0.0);
         let finite = out.abs().simd_lt(inf);
         let clean = f32x4::blend(finite, out, zero);
 
         // Splice the correct out_a into lane 3, keeping sanitized RGB in 0..2,
         // without leaving SIMD. `rgb_sel` is true (all-bits) in lanes 0..2.
-        let rgb_sel = f32x4::from_array(token, [1.0, 1.0, 1.0, 0.0]).simd_gt(zero);
-        let result = f32x4::blend(rgb_sel, clean, f32x4::splat(token, out_a));
+        let rgb_sel = f32x4::from_array_t(token, [1.0, 1.0, 1.0, 0.0]).simd_gt(zero);
+        let result = f32x4::blend(rgb_sel, clean, f32x4::splat_t(token, out_a));
 
         result.store(fg_chunk);
     }
@@ -299,21 +301,21 @@ macro_rules! artistic_premul_fn {
 artistic_premul_fn!(
     blend_overlay_simd,
     |t, fg: f32x4<T>, bg: f32x4<T>, base: f32x4<T>, sa: f32, da: f32| {
-        let two = f32x4::splat(t, 2.0);
+        let two = f32x4::splat_t(t, 2.0);
         let lo = base + two * fg * bg;
-        let hi = base + f32x4::splat(t, sa * da)
-            - two * (f32x4::splat(t, sa) - fg) * (f32x4::splat(t, da) - bg);
-        f32x4::blend(bg.simd_lt(f32x4::splat(t, 0.5 * da)), lo, hi)
+        let hi = base + f32x4::splat_t(t, sa * da)
+            - two * (f32x4::splat_t(t, sa) - fg) * (f32x4::splat_t(t, da) - bg);
+        f32x4::blend(bg.simd_lt(f32x4::splat_t(t, 0.5 * da)), lo, hi)
     }
 );
 artistic_premul_fn!(
     blend_hard_light_simd,
     |t, fg: f32x4<T>, bg: f32x4<T>, base: f32x4<T>, sa: f32, da: f32| {
-        let two = f32x4::splat(t, 2.0);
+        let two = f32x4::splat_t(t, 2.0);
         let lo = base + two * fg * bg;
-        let hi = base + f32x4::splat(t, sa * da)
-            - two * (f32x4::splat(t, sa) - fg) * (f32x4::splat(t, da) - bg);
-        f32x4::blend(fg.simd_lt(f32x4::splat(t, 0.5 * sa)), lo, hi)
+        let hi = base + f32x4::splat_t(t, sa * da)
+            - two * (f32x4::splat_t(t, sa) - fg) * (f32x4::splat_t(t, da) - bg);
+        f32x4::blend(fg.simd_lt(f32x4::splat_t(t, 0.5 * sa)), lo, hi)
     }
 );
 
@@ -337,24 +339,24 @@ artistic_premul_fn!(
 artistic_premul_fn!(
     blend_linear_light_simd,
     |t, fg: f32x4<T>, bg: f32x4<T>, base: f32x4<T>, sa: f32, da: f32| {
-        let two = f32x4::splat(t, 2.0);
-        let sada = f32x4::splat(t, sa * da);
-        let common = two * f32x4::splat(t, da) * fg + f32x4::splat(t, sa) * bg;
-        let lo = base + (common - sada).max(f32x4::splat(t, 0.0));
+        let two = f32x4::splat_t(t, 2.0);
+        let sada = f32x4::splat_t(t, sa * da);
+        let common = two * f32x4::splat_t(t, da) * fg + f32x4::splat_t(t, sa) * bg;
+        let lo = base + (common - sada).max(f32x4::splat_t(t, 0.0));
         let hi = base + (common - sada).min(sada);
-        f32x4::blend(fg.simd_lt(f32x4::splat(t, 0.5 * sa)), lo, hi)
+        f32x4::blend(fg.simd_lt(f32x4::splat_t(t, 0.5 * sa)), lo, hi)
     }
 );
 artistic_premul_fn!(
     blend_pin_light_simd,
     |t, fg: f32x4<T>, bg: f32x4<T>, base: f32x4<T>, sa: f32, da: f32| {
-        let two = f32x4::splat(t, 2.0);
-        let sada = f32x4::splat(t, sa * da);
-        let sa_bg = f32x4::splat(t, sa) * bg;
-        let two_da_fg = two * f32x4::splat(t, da) * fg;
+        let two = f32x4::splat_t(t, 2.0);
+        let sada = f32x4::splat_t(t, sa * da);
+        let sa_bg = f32x4::splat_t(t, sa) * bg;
+        let two_da_fg = two * f32x4::splat_t(t, da) * fg;
         let lo = base + sa_bg.min(two_da_fg);
         let hi = base + sa_bg.max(two_da_fg - sada);
-        f32x4::blend(fg.simd_lt(f32x4::splat(t, 0.5 * sa)), lo, hi)
+        f32x4::blend(fg.simd_lt(f32x4::splat_t(t, 0.5 * sa)), lo, hi)
     }
 );
 
@@ -378,10 +380,10 @@ artistic_premul_fn!(
 artistic_premul_fn!(
     blend_color_dodge_simd,
     |t, fg: f32x4<T>, bg: f32x4<T>, base: f32x4<T>, sa: f32, da: f32| {
-        let zero = f32x4::splat(t, 0.0);
-        let sada = f32x4::splat(t, sa * da);
-        let sa_v = f32x4::splat(t, sa);
-        let num = f32x4::splat(t, sa * sa) * bg;
+        let zero = f32x4::splat_t(t, 0.0);
+        let sada = f32x4::splat_t(t, sa * da);
+        let sa_v = f32x4::splat_t(t, sa);
+        let num = f32x4::splat_t(t, sa * sa) * bg;
         let quot = (num / (sa_v - fg)).min(sada);
         // Cs >= 1 first, then Cd <= 0 — matching the scalar's guard order.
         let r = f32x4::blend(fg.simd_ge(sa_v), sada, quot);
@@ -394,10 +396,10 @@ artistic_premul_fn!(
 artistic_premul_fn!(
     blend_color_burn_simd,
     |t, fg: f32x4<T>, bg: f32x4<T>, base: f32x4<T>, sa: f32, da: f32| {
-        let zero = f32x4::splat(t, 0.0);
-        let sada = f32x4::splat(t, sa * da);
-        let da_v = f32x4::splat(t, da);
-        let num = f32x4::splat(t, sa * sa) * (da_v - bg);
+        let zero = f32x4::splat_t(t, 0.0);
+        let sada = f32x4::splat_t(t, sa * da);
+        let da_v = f32x4::splat_t(t, da);
+        let num = f32x4::splat_t(t, sa * sa) * (da_v - bg);
         let term = sada - (num / fg).min(sada);
         // Guard order matches the scalar: Cd >= 1 first, then Cs <= 0.
         let r = f32x4::blend(fg.simd_le(zero), zero, term);
@@ -419,12 +421,12 @@ artistic_premul_fn!(
 // one extra compare and select over VividLight, with no extra division.
 #[inline]
 fn vivid_term<T: F32x4Backend>(t: T, fg: f32x4<T>, bg: f32x4<T>, sa: f32, da: f32) -> f32x4<T> {
-    let zero = f32x4::splat(t, 0.0);
-    let two = f32x4::splat(t, 2.0);
-    let sada = f32x4::splat(t, sa * da);
-    let sa_v = f32x4::splat(t, sa);
-    let da_v = f32x4::splat(t, da);
-    let sa2 = f32x4::splat(t, sa * sa);
+    let zero = f32x4::splat_t(t, 0.0);
+    let two = f32x4::splat_t(t, 2.0);
+    let sada = f32x4::splat_t(t, sa * da);
+    let sa_v = f32x4::splat_t(t, sa);
+    let da_v = f32x4::splat_t(t, da);
+    let sa2 = f32x4::splat_t(t, sa * sa);
 
     // Cs < 0.5 branch: ColorBurn(2Cs, Cd).
     let burn = sada - (sa2 * (da_v - bg) / (two * fg)).min(sada);
@@ -436,7 +438,7 @@ fn vivid_term<T: F32x4Backend>(t: T, fg: f32x4<T>, bg: f32x4<T>, sa: f32, da: f3
     let dodge = f32x4::blend(fg.simd_ge(sa_v), sada, dodge);
     let dodge = f32x4::blend(bg.simd_le(zero), zero, dodge);
 
-    f32x4::blend(fg.simd_lt(f32x4::splat(t, 0.5 * sa)), burn, dodge)
+    f32x4::blend(fg.simd_lt(f32x4::splat_t(t, 0.5 * sa)), burn, dodge)
 }
 
 artistic_premul_fn!(
@@ -448,12 +450,12 @@ artistic_premul_fn!(
 artistic_premul_fn!(
     blend_hard_mix_simd,
     |t, fg: f32x4<T>, bg: f32x4<T>, base: f32x4<T>, sa: f32, da: f32| {
-        let sada = f32x4::splat(t, sa * da);
+        let sada = f32x4::splat_t(t, sa * da);
         let v = vivid_term(t, fg, bg, sa, da);
         // f < 0.5  <->  sa·da·f < 0.5·sa·da
         base + f32x4::blend(
-            v.simd_lt(f32x4::splat(t, 0.5 * sa * da)),
-            f32x4::splat(t, 0.0),
+            v.simd_lt(f32x4::splat_t(t, 0.5 * sa * da)),
+            f32x4::splat_t(t, 0.0),
             sada,
         )
     }
@@ -486,32 +488,33 @@ artistic_premul_fn!(
 artistic_premul_fn!(
     blend_soft_light_simd,
     |t, fg: f32x4<T>, bg: f32x4<T>, base: f32x4<T>, sa: f32, da: f32| {
-        let two = f32x4::splat(t, 2.0);
-        let one = f32x4::splat(t, 1.0);
+        let two = f32x4::splat_t(t, 2.0);
+        let one = f32x4::splat_t(t, 1.0);
         // Same guarded reciprocals the scalar reference computes.
         let inv_sa = if sa > 0.0 { 1.0 / sa } else { 0.0 };
         let inv_da = if da > 0.0 { 1.0 / da } else { 0.0 };
-        let cs = fg * f32x4::splat(t, inv_sa);
-        let cd = bg * f32x4::splat(t, inv_da);
+        let cs = fg * f32x4::splat_t(t, inv_sa);
+        let cd = bg * f32x4::splat_t(t, inv_da);
 
         let lo = cd - (one - two * cs) * cd * (one - cd);
 
-        let poly =
-            ((f32x4::splat(t, 16.0) * cd - f32x4::splat(t, 12.0)) * cd + f32x4::splat(t, 4.0)) * cd;
-        let g = f32x4::blend(cd.simd_le(f32x4::splat(t, 0.25)), poly, cd.sqrt());
+        let poly = ((f32x4::splat_t(t, 16.0) * cd - f32x4::splat_t(t, 12.0)) * cd
+            + f32x4::splat_t(t, 4.0))
+            * cd;
+        let g = f32x4::blend(cd.simd_le(f32x4::splat_t(t, 0.25)), poly, cd.sqrt());
         let hi = cd + (two * cs - one) * (g - cd);
 
-        let blended = f32x4::blend(cs.simd_le(f32x4::splat(t, 0.5)), lo, hi);
-        base + f32x4::splat(t, sa * da) * blended
+        let blended = f32x4::blend(cs.simd_le(f32x4::splat_t(t, 0.5)), lo, hi);
+        base + f32x4::splat_t(t, sa * da) * blended
     }
 );
 
 artistic_premul_fn!(
     blend_divide_simd,
     |t, fg: f32x4<T>, bg: f32x4<T>, base: f32x4<T>, sa: f32, da: f32| {
-        let zero = f32x4::splat(t, 0.0);
-        let sada = f32x4::splat(t, sa * da);
-        let num = f32x4::splat(t, sa * sa) * bg;
+        let zero = f32x4::splat_t(t, 0.0);
+        let sada = f32x4::splat_t(t, sa * da);
+        let num = f32x4::splat_t(t, sa * sa) * bg;
         let quot = (num / fg).min(sada);
         f32x4::blend(fg.simd_le(zero), sada, quot) + base
     }
@@ -539,8 +542,8 @@ artistic_premul_fn!(
 artistic_premul_fn!(
     blend_darken_simd,
     |t: T, fg: f32x4<T>, bg: f32x4<T>, base: f32x4<T>, sa, da| {
-        let dfg = fg * f32x4::splat(t, da);
-        let sbg = bg * f32x4::splat(t, sa);
+        let dfg = fg * f32x4::splat_t(t, da);
+        let sbg = bg * f32x4::splat_t(t, sa);
         base + dfg.min(sbg)
     }
 );
@@ -548,8 +551,8 @@ artistic_premul_fn!(
 artistic_premul_fn!(
     blend_lighten_simd,
     |t: T, fg: f32x4<T>, bg: f32x4<T>, base: f32x4<T>, sa, da| {
-        let dfg = fg * f32x4::splat(t, da);
-        let sbg = bg * f32x4::splat(t, sa);
+        let dfg = fg * f32x4::splat_t(t, da);
+        let sbg = bg * f32x4::splat_t(t, sa);
         base + dfg.max(sbg)
     }
 );
@@ -557,8 +560,8 @@ artistic_premul_fn!(
 artistic_premul_fn!(
     blend_difference_simd,
     |t: T, fg: f32x4<T>, bg: f32x4<T>, base: f32x4<T>, sa, da| {
-        let dfg = fg * f32x4::splat(t, da);
-        let sbg = bg * f32x4::splat(t, sa);
+        let dfg = fg * f32x4::splat_t(t, da);
+        let sbg = bg * f32x4::splat_t(t, sa);
         base + (dfg - sbg).abs()
     }
 );
@@ -581,27 +584,27 @@ artistic_premul_fn!(
 artistic_premul_fn!(
     blend_linear_dodge_simd,
     |t: T, fg: f32x4<T>, bg: f32x4<T>, base: f32x4<T>, sa, da| {
-        let dfg = fg * f32x4::splat(t, da);
-        let sbg = bg * f32x4::splat(t, sa);
-        base + f32x4::splat(t, sa * da).min(dfg + sbg)
+        let dfg = fg * f32x4::splat_t(t, da);
+        let sbg = bg * f32x4::splat_t(t, sa);
+        base + f32x4::splat_t(t, sa * da).min(dfg + sbg)
     }
 );
 // out = base + max(0, da·fg + sa·bg − sa·da)
 artistic_premul_fn!(
     blend_linear_burn_simd,
     |t: T, fg: f32x4<T>, bg: f32x4<T>, base: f32x4<T>, sa, da| {
-        let dfg = fg * f32x4::splat(t, da);
-        let sbg = bg * f32x4::splat(t, sa);
-        base + ((dfg + sbg) - f32x4::splat(t, sa * da)).max(f32x4::splat(t, 0.0))
+        let dfg = fg * f32x4::splat_t(t, da);
+        let sbg = bg * f32x4::splat_t(t, sa);
+        base + ((dfg + sbg) - f32x4::splat_t(t, sa * da)).max(f32x4::splat_t(t, 0.0))
     }
 );
 // out = base + max(0, sa·bg − da·fg)
 artistic_premul_fn!(
     blend_subtract_simd,
     |t: T, fg: f32x4<T>, bg: f32x4<T>, base: f32x4<T>, sa, da| {
-        let dfg = fg * f32x4::splat(t, da);
-        let sbg = bg * f32x4::splat(t, sa);
-        base + (sbg - dfg).max(f32x4::splat(t, 0.0))
+        let dfg = fg * f32x4::splat_t(t, da);
+        let sbg = bg * f32x4::splat_t(t, sa);
+        base + (sbg - dfg).max(f32x4::splat_t(t, 0.0))
     }
 );
 
@@ -614,18 +617,18 @@ pub(super) fn lerp_row_apply<T: F32x4Backend>(
     t: &[f32],
     out: &mut [f32],
 ) {
-    let (a_chunks, _) = f32x4::<T>::partition_slice(token, a);
-    let (b_chunks, _) = f32x4::<T>::partition_slice(token, b);
-    let (out_chunks, _) = f32x4::<T>::partition_slice_mut(token, out);
+    let (a_chunks, _) = f32x4::<T>::partition_slice_t(token, a);
+    let (b_chunks, _) = f32x4::<T>::partition_slice_t(token, b);
+    let (out_chunks, _) = f32x4::<T>::partition_slice_mut_t(token, out);
 
     for ((a_chunk, b_chunk), (&tv, out_chunk)) in a_chunks
         .iter()
         .zip(b_chunks.iter())
         .zip(t.iter().zip(out_chunks.iter_mut()))
     {
-        let a_vec = f32x4::load(token, a_chunk);
-        let b_vec = f32x4::load(token, b_chunk);
-        let t_vec = f32x4::splat(token, tv);
+        let a_vec = f32x4::load_t(token, a_chunk);
+        let b_vec = f32x4::load_t(token, b_chunk);
+        let t_vec = f32x4::splat_t(token, tv);
         let result = a_vec + (b_vec - a_vec) * t_vec;
         result.store(out_chunk);
     }

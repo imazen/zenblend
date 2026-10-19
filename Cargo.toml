@@ -25,8 +25,8 @@ _dev = ["archmage/testable_dispatch"]
 unexpected_cfgs = { level = "allow", check-cfg = ['cfg(feature, values("avx512"))'] }
 
 [dependencies]
-archmage = { version = "0.9.16", default-features = false, features = ["macros", "std"] }
-magetypes = { version = "0.9.16", default-features = false, features = ["std"] }
+archmage = { version = ">=0.9.16, <=0.9.31-beta.1", default-features = false, features = ["macros", "std"] }
+magetypes = { version = ">=0.9.30, <=0.9.31-beta.1", default-features = false, features = ["std"] }
 safe_unaligned_simd = "0.2.5"
 
 [[bench]]
