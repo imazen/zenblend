@@ -17,10 +17,12 @@
 //! All pixel data must be **premultiplied linear f32**, 4 channels (RGBA).
 //! Lengths must be equal and divisible by 4.
 
+#![cfg_attr(not(any(feature = "std", test)), no_std)]
 #![forbid(unsafe_code)]
 
 mod blend;
 pub mod mask;
+mod math;
 mod simd;
 
 /// Dev-only: the ORIGINAL unpremultiplying Overlay, kept reachable so

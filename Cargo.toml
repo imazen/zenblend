@@ -7,13 +7,13 @@ license = "AGPL-3.0-only OR LicenseRef-Imazen-Commercial"
 description = "Porter-Duff and artistic blend modes on premultiplied linear f32 RGBA rows. SIMD-accelerated."
 repository = "https://github.com/imazen/zenblend"
 keywords = ["blend", "compositing", "porter-duff", "simd", "alpha"]
-categories = ["graphics", "multimedia::images"]
+categories = ["graphics", "multimedia::images", "no-std", "no-std::no-alloc"]
 readme = "README.crates.md"
 include = ["src/**/*.rs", "benches/**/*.rs", "tests/**/*.rs", "Cargo.toml", "LICENSE-AGPL3", "LICENSE-COMMERCIAL", "README.crates.md", "CHANGELOG.md"]
 
 [features]
 default = ["std"]
-std = []
+std = ["archmage/std", "magetypes/std"]
 # Enables archmage/testable_dispatch so benches/tier_isolation.rs can disable
 # the baseline SIMD token (NEON on aarch64) and measure a real scalar arm.
 # Dev-only: never enable in a published build.
@@ -25,9 +25,15 @@ _dev = ["archmage/testable_dispatch"]
 unexpected_cfgs = { level = "allow", check-cfg = ['cfg(feature, values("avx512"))'] }
 
 [dependencies]
-archmage = { version = ">=0.9.16, <=0.9.31-beta.1", default-features = false, features = ["macros", "std"] }
-magetypes = { version = ">=0.9.30, <=0.9.31-beta.1", default-features = false, features = ["std"] }
+archmage = { version = ">=0.9.16, <=0.9.31-beta.1", default-features = false, features = ["macros"] }
+magetypes = { version = ">=0.9.30, <=0.9.31-beta.1", default-features = false }
+libm = { version = "0.2.16", default-features = false }
 safe_unaligned_simd = "0.2.5"
+
+[dev-dependencies]
+# tests/simd_consistency.rs uses archmage::testing, which needs std; the
+# library itself builds without it (see the no_std CI job).
+archmage = { version = ">=0.9.16, <=0.9.31-beta.1", default-features = false, features = ["macros", "std"] }
 
 [[bench]]
 name = "tier_isolation"

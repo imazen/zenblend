@@ -44,6 +44,23 @@ jobs:
       - name: Test (no_std)
         run: cargo test --no-default-features
 
+  no-std:
+    name: no_std build (bare metal)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: thumbv7em-none-eabihf, x86_64-unknown-none
+      - uses: Swatinem/rust-cache@v2
+
+      # A host-target `cargo test --no-default-features` can still link std
+      # through a dependency; targets without std catch that.
+      - name: Build thumbv7em-none-eabihf
+        run: cargo build --no-default-features --target thumbv7em-none-eabihf
+      - name: Build x86_64-unknown-none
+        run: cargo build --no-default-features --target x86_64-unknown-none
+
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
