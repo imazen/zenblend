@@ -6,6 +6,7 @@
 //! row, not per pixel.
 
 use crate::BlendMode;
+use crate::math;
 use crate::simd;
 
 /// Dispatch blend_row to the appropriate kernel.
@@ -198,7 +199,7 @@ fn dispatch_blend_pixel(fg: &mut [f32; 4], bg: &[f32; 4], mode: BlendMode) {
                 let g = if d <= 0.25 {
                     ((16.0 * d - 12.0) * d + 4.0) * d
                 } else {
-                    d.sqrt()
+                    math::sqrt(d)
                 };
                 d + (2.0 * s - 1.0) * (g - d)
             }
@@ -391,7 +392,7 @@ artistic_row!(blend_soft_light, |s: f32, d: f32| {
         let g = if d <= 0.25 {
             ((16.0 * d - 12.0) * d + 4.0) * d
         } else {
-            d.sqrt()
+            math::sqrt(d)
         };
         d + (2.0 * s - 1.0) * (g - d)
     }
