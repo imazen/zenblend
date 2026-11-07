@@ -4,6 +4,9 @@
 
 ### Dependency compatibility
 
+- Name backend-dependent SIMD multiply-add explicitly as `mul_add_relaxed`;
+  this retains the released alias behavior and clears stable deprecation diagnostics.
+
 - Admit the current SIMD beta and use equivalent token-explicit SIMD constructors (`0343372b`). Strict library lint and the existing library tests pass; arithmetic and expectations are unchanged.
 
 ### Changed
