@@ -27,3 +27,9 @@ ci: fmt clippy feature-check test test-nostd
 # Run benchmarks
 bench *ARGS:
     cargo bench {{ARGS}}
+
+# Stable SIMD qualification for the frozen consumer revision.
+stable-cohort-check:
+    cargo fmt --check
+    cargo test --lib --tests
+    cargo clippy --lib --tests -- -D warnings
