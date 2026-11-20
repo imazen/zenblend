@@ -43,7 +43,7 @@ pub(crate) fn blend_src_over_row_v3(token: X64V3Token, fg: &mut [f32], bg: &[f32
         // way, so it is deliberately not changed as a drive-by. Whoever takes
         // it: make the tail match the body first, since a function disagreeing
         // with itself is the half that has no upside.
-        let result = bg_vec.mul_add(inv_alpha, fg_vec);
+        let result = bg_vec.mul_add_relaxed(inv_alpha, fg_vec);
         result.store(fg_chunk);
     }
 
@@ -86,7 +86,7 @@ pub(crate) fn blend_src_over_solid_v3(token: X64V3Token, fg: &mut [f32], pixel: 
         let fg_vec = f32x8::load_t(token, fg_chunk);
         let alpha = f32x8::from_raw_t(token, _mm256_shuffle_ps::<0xFF>(fg_vec.raw(), fg_vec.raw()));
         let inv_alpha = ones - alpha;
-        let result = px.mul_add(inv_alpha, fg_vec);
+        let result = px.mul_add_relaxed(inv_alpha, fg_vec);
         result.store(fg_chunk);
     }
 
@@ -124,9 +124,9 @@ pub(crate) fn blend_src_over_solid_opaque_v3(token: X64V3Token, fg: &mut [f32], 
         let fg_vec = f32x8::load_t(token, fg_chunk);
         let alpha = f32x8::from_raw_t(token, _mm256_shuffle_ps::<0xFF>(fg_vec.raw(), fg_vec.raw()));
         let inv_alpha = ones - alpha;
-        let blended = px.mul_add(inv_alpha, fg_vec);
+        let blended = px.mul_add_relaxed(inv_alpha, fg_vec);
         // Force alpha to 1.0: result = blended * alpha_blend + alpha_mask
-        let result = blended.mul_add(alpha_blend, alpha_mask);
+        let result = blended.mul_add_relaxed(alpha_blend, alpha_mask);
         result.store(fg_chunk);
     }
 
@@ -218,7 +218,7 @@ pub(crate) fn mask_row_rgb_apply_v3(token: X64V3Token, fg: &mut [f32], mask: &[f
         );
         let masked = fg_vec * mask_vec;
         // result = masked * blend_select + fg * alpha_select
-        let result = fg_vec.mul_add(alpha_select, masked * blend_select);
+        let result = fg_vec.mul_add_relaxed(alpha_select, masked * blend_select);
         result.store(fg_chunk);
     }
 
@@ -272,7 +272,7 @@ pub(crate) fn lerp_row_apply_v3(
         );
         let diff = b_vec - a_vec;
         // out = a + diff * t = fmadd(diff, t, a)
-        let result = diff.mul_add(t_vec, a_vec);
+        let result = diff.mul_add_relaxed(t_vec, a_vec);
         result.store(out_chunk);
     }
 

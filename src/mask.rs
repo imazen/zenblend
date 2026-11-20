@@ -135,10 +135,10 @@ impl MaskSpans {
         let width = if n > 0 { self.spans[n - 1].end } else { return };
 
         // Pass 1: expand each Partial span's start down and end up to align boundary.
-        for i in 0..n {
-            if self.spans[i].kind == SpanKind::Partial {
-                self.spans[i].start = round_down(self.spans[i].start, align);
-                self.spans[i].end = round_up(self.spans[i].end, align).min(width);
+        for span in &mut self.spans[..n] {
+            if span.kind == SpanKind::Partial {
+                span.start = round_down(span.start, align);
+                span.end = round_up(span.end, align).min(width);
             }
         }
 
