@@ -8,6 +8,7 @@
 
 ### Changed
 
+- Pass `CROSS_CONTAINER_OPTS: --security-opt seccomp=unconfined` to the `test-i686` CI job in `.github/workflows/ci.yml`.
 - Accept the archmage and magetypes 0.9.31 stable release.
 
 - `zenutils-apidoc` 0.1.0 → 0.1.1 in the workspace-excluded, CI-free apidoc
