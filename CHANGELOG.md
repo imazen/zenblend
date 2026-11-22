@@ -8,6 +8,8 @@
 
 ### Changed
 
+- Accept the archmage and magetypes 0.9.31 stable release.
+
 - `zenutils-apidoc` 0.1.0 → 0.1.1 in the workspace-excluded, CI-free apidoc
   runner. Audited against the crates.io API, every other requirement in this
   crate is already current: `safe_unaligned_simd` 0.2.5 is the latest release,
