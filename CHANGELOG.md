@@ -8,6 +8,7 @@
 
 ### Changed
 
+- Upgrade `archmage` and `magetypes` requirements to `0.9.33`.
 - Pass `CROSS_CONTAINER_OPTS: --security-opt seccomp=unconfined` to the `test-i686` CI job in `.github/workflows/ci.yml`.
 - Accept the archmage and magetypes 0.9.31 stable release.
 
