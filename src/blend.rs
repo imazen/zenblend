@@ -14,6 +14,15 @@ use crate::simd;
 pub(crate) fn dispatch_blend_row(fg: &mut [f32], bg: &[f32], mode: BlendMode) {
     match mode {
         BlendMode::SrcOver => simd::blend_src_over_row(fg, bg),
+        other => dispatch_blend_row_other(fg, bg, other),
+    }
+}
+
+/// Dispatch non-SrcOver blend_row out-of-line so multi-caller sites do not duplicate the switch.
+#[inline(never)]
+fn dispatch_blend_row_other(fg: &mut [f32], bg: &[f32], mode: BlendMode) {
+    match mode {
+        BlendMode::SrcOver => simd::blend_src_over_row(fg, bg),
         BlendMode::Clear => blend_clear(fg),
         BlendMode::Src => {} // fg already contains src
         BlendMode::Dst => fg.copy_from_slice(bg),
@@ -75,9 +84,6 @@ pub(crate) fn dispatch_blend_row(fg: &mut [f32], bg: &[f32], mode: BlendMode) {
         // eight all need an alpha broadcast, which is exactly what they gain by
         // being vectorized.
         BlendMode::Plus => blend_plus(fg, bg),
-        // non_exhaustive: future variants
-        #[allow(unreachable_patterns)]
-        _ => unimplemented!("blend mode not yet implemented"),
     }
 }
 
@@ -86,23 +92,25 @@ pub(crate) fn dispatch_blend_row(fg: &mut [f32], bg: &[f32], mode: BlendMode) {
 pub(crate) fn dispatch_blend_row_solid(fg: &mut [f32], pixel: &[f32; 4], mode: BlendMode) {
     match mode {
         BlendMode::SrcOver => simd::blend_src_over_solid(fg, pixel),
-        // For non-SrcOver modes, construct a repeated bg row on the stack and delegate.
-        // This is fine for solid backgrounds — the match is once per row.
-        other => {
-            // Fast path for trivial modes that don't need bg data
-            match other {
-                BlendMode::Clear => {
-                    blend_clear(fg);
-                    return;
-                }
-                BlendMode::Src => return, // fg unchanged
-                _ => {}
-            }
-            // General path: repeat the solid pixel into a temp row and delegate
-            for s in fg.as_chunks_mut::<4>().0 {
-                dispatch_blend_pixel(s, pixel, other);
-            }
+        other => dispatch_blend_row_solid_other(fg, pixel, other),
+    }
+}
+
+/// Dispatch non-SrcOver blend_row_solid out-of-line so solid callers share one loop.
+#[inline(never)]
+fn dispatch_blend_row_solid_other(fg: &mut [f32], pixel: &[f32; 4], mode: BlendMode) {
+    // Fast path for trivial modes that don't need bg data
+    match mode {
+        BlendMode::Clear => {
+            blend_clear(fg);
+            return;
         }
+        BlendMode::Src => return, // fg unchanged
+        _ => {}
+    }
+    // General path: per-pixel blend using the unpremul/scalar pixel kernel
+    for s in fg.as_chunks_mut::<4>().0 {
+        dispatch_blend_pixel(s, pixel, mode);
     }
 }
 
@@ -113,7 +121,7 @@ pub(crate) fn dispatch_blend_row_solid_opaque(fg: &mut [f32], pixel: &[f32; 4], 
         BlendMode::SrcOver => simd::blend_src_over_solid_opaque(fg, pixel),
         // For other modes, the opaque hint doesn't change the formula —
         // just lets us skip the alpha multiply. For now, delegate to solid.
-        other => dispatch_blend_row_solid(fg, pixel, other),
+        other => dispatch_blend_row_solid_other(fg, pixel, other),
     }
 }
 
